@@ -1,0 +1,26 @@
+PASS Interfaz: login contra el servidor local
+PASS Diseño móvil sin desbordamiento, sidebar cerrado
+PASS Navegación móvil
+PASS Alta de paciente desde formulario
+PASS Búsqueda de pacientes
+PASS Edición de ficha
+PASS Alta de turno desde agenda
+PASS Error de conflicto visible en el formulario
+PASS Cambio de estado de turno
+PASS Reprogramación persistida
+PASS Evolución SOAP y verificación de hash
+PASS Enmienda sin sobrescribir el original
+PASS Registro manual de pago rotulado como demo
+PASS Borrador interno sin emisión fiscal
+PASS Contacto y cambio de etapa Kanban
+PASS Conector sin falso estado de éxito
+PASS Control operativo guardado en servidor
+PASS Asistente resume datos reales de la demo
+PASS Acceso diferenciado de Super Admin
+PASS Alta de workspace sin datos clínicos compartidos
+PASS Sin excepciones JavaScript en los flujos probados
+PASS HTML autocontenido renderiza sin servidor ni recursos externos
+PASS Hash de la vista previa coincide con SHA-256 independiente
+PASS Formulario de paciente en modo offline
+PASS Sin excepciones JavaScript en la vista previa
+TOTAL PASSED 25

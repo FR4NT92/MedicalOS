@@ -1,0 +1,25 @@
+REFERENCIA ORIGINAL, NO EJECUTADA NI VALIDADA
+
+El ZIP de esta carpeta conserva 111 archivos fuente del adjunto original.
+No interviene en el arranque de la nueva implementación local.
+Las afirmaciones de cumplimiento, integraciones y tests de su documentación no han sido confirmadas.
+
+Se excluyeron por higiene de entrega:
+apps/api/app/api/v1/__pycache__/compliance.cpython-314.pyc
+apps/api/app/api/v1/__pycache__/ghl.cpython-314.pyc
+apps/api/app/core/__pycache__/config.cpython-314.pyc
+apps/api/app/core/__pycache__/security.cpython-314.pyc
+apps/api/app/services/__pycache__/audio_transcriber.cpython-314.pyc
+apps/api/app/services/__pycache__/compliance_service.cpython-314.pyc
+apps/api/app/services/__pycache__/copilot_orchestrator.cpython-314.pyc
+apps/api/app/services/__pycache__/fhir_bundle_service.cpython-314.pyc
+apps/api/app/services/__pycache__/ghl_client.cpython-314.pyc
+apps/api/app/services/__pycache__/regulatory_engine.cpython-314.pyc
+apps/api/app/__pycache__/main.cpython-314.pyc
+apps/api/tests/__pycache__/test_compliance_signature.cpython-314.pyc
+apps/api/tests/__pycache__/test_fhir_bundle.cpython-314.pyc
+apps/api/tests/__pycache__/test_multitenant_security.cpython-314.pyc
+apps/web/.env.local
+apps/web/tsconfig.tsbuildinfo
+packages/db/.env
+.env
