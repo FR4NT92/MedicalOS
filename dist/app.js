@@ -1,6 +1,10 @@
 (() => {
 'use strict';
 const PREVIEW = Boolean(window.CLINIC_PREVIEW);
+const SUPABASE_CONFIG = {
+  url: 'https://jshyrwjfeyybdnzosgik.supabase.co',
+  anonKey: 'sb_publishable_DKsMr-TvrAfsv49jWjXIJg__776DkGc'
+};
 const makeId = () => globalThis.crypto?.randomUUID?.() || Array.from(crypto.getRandomValues(new Uint8Array(16)), x => x.toString(16).padStart(2, '0')).join('');
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -176,6 +180,7 @@ const S = {
   chat: [],
   recordTab: 'notes',
   agendaCollapsed: false,
+  supportMode: null,
   preview: PREVIEW
 };
 
@@ -187,6 +192,7 @@ async function api(path, method = 'GET', body = null, headers = {}) {
     headers: {
       'Content-Type': 'application/json',
       ...(S.session?.csrf ? { 'X-CSRF-Token': S.session.csrf } : {}),
+      ...(S.supportMode?.id ? { 'X-Workspace-Id': S.supportMode.id } : {}),
       ...headers
     },
     ...(body === null ? {} : { body: JSON.stringify(body) })
@@ -315,10 +321,18 @@ function shell() {
   <div class="app-shell ${PREVIEW ? 'is-preview' : ''}">
     <aside class="sidebar ${S.mobile ? 'open' : ''}">
       ${brand()}
-      <div class="nav-group">${isAdmin ? 'PORTAL CENTRAL' : 'ESPACIO DE TRABAJO'}</div>
+      <div class="nav-group">${isAdmin ? (S.supportMode ? 'MODO SOPORTE CLÍNICO' : 'PORTAL CENTRAL') : 'ESPACIO DE TRABAJO'}</div>
       <nav aria-label="Navegación principal">
         ${isAdmin
-          ? navItem('admin', 'building') + navItem('integrations', 'plug') + navItem('audit', 'activity') + navItem('settings', 'settings')
+          ? (S.supportMode
+              ? `<div style="padding: 0 10px 10px;"><button class="btn small primary wide" data-action="exit-support-mode">${icon('arrow-left', 13)} Volver a Admin</button></div>` +
+                navItem('integrations', 'plug') +
+                navItem('settings', 'settings') +
+                navItem('home', 'home') +
+                navItem('schedule', 'calendar', activeDay().length) +
+                navItem('patients', 'users')
+              : navItem('admin', 'building') + navItem('integrations', 'plug') + navItem('audit', 'activity') + navItem('settings', 'settings')
+            )
           : navItem('home', 'home') +
             navItem('schedule', 'calendar', activeDay().length) +
             navItem('patients', 'users') +
@@ -335,7 +349,7 @@ function shell() {
           ${avatar(u.name)}
           <div>
             <b>${esc(u.name)}</b>
-            <small>${isAdmin ? 'Super Administrador' : 'Equipo Médico'}</small>
+            <small>${isAdmin ? (S.supportMode ? 'Soporte Activo' : 'Super Administrador') : 'Equipo Médico'}</small>
           </div>
           <button class="icon-btn" data-action="logout" aria-label="Cerrar sesión">${icon('logout', 16)}</button>
         </div>
@@ -343,6 +357,16 @@ function shell() {
     </aside>
 
     <div class="main-wrap">
+      ${S.supportMode ? `
+      <div class="support-mode-banner" style="background:#15372f;color:#e8f4ed;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #2d6a50;font-size:13px;position:sticky;top:0;z-index:99;">
+        <div class="flex" style="gap:10px;align-items:center;">
+          <span class="badge amber" style="font-weight:700;font-size:11px;letter-spacing:0.5px;">MODO CONFIGURACIÓN Y SOPORTE</span>
+          <span>Gestionando clínica de: <strong style="color:#ffffff;">${esc(S.supportMode.name)}</strong> <span class="mono muted" style="color:#a7f3d0;">(${esc(S.supportMode.id)})</span></span>
+        </div>
+        <button class="btn small" data-action="exit-support-mode" style="background:#ffffff;color:#15372f;font-weight:600;border:none;">
+          ${icon('close', 12)} Salir y Volver al Panel Admin
+        </button>
+      </div>` : ''}
       <header class="topbar">
         <div class="flex">
           <button class="icon-btn mobile-toggle" data-action="menu" aria-label="Abrir menú">${icon('menu', 20)}</button>
@@ -1065,6 +1089,9 @@ function adminView() {
           <td>${w.status === 'PAUSED' ? '<span class="badge amber"><i class="dot"></i> Pausada</span>' : '<span class="badge green"><i class="dot online"></i> Operativa</span>'}</td>
           <td>
             <div class="flex" style="gap:6px">
+              <button class="btn small primary" data-action="manage-clinic" data-id="${w.id}" data-name="${esc(w.name)}" title="Ingresar a configurar integraciones y GHL para esta clínica">
+                ${icon('settings', 13)} Gestionar Clínica & GHL
+              </button>
               <button class="btn small" data-action="toggle-ws-status" data-id="${w.id}" data-status="${w.status || 'ACTIVE'}" title="${w.status === 'PAUSED' ? 'Reanudar acceso' : 'Pausar clínica temporalmente'}">
                 ${w.status === 'PAUSED' ? icon('check', 13) + ' Reanudar' : icon('clock', 13) + ' Pausar'}
               </button>
@@ -1156,7 +1183,7 @@ function settingsView() {
 
 async function navigate(view, push = true) {
   const isAdmin = S.session?.user?.role === 'SUPER_ADMIN';
-  if (isAdmin && !['admin', 'integrations', 'audit', 'settings'].includes(view)) {
+  if (isAdmin && !S.supportMode && !['admin', 'integrations', 'audit', 'settings'].includes(view)) {
     view = 'admin';
   }
   if (!isAdmin && ['admin'].includes(view)) {
@@ -1170,7 +1197,7 @@ async function navigate(view, push = true) {
 }
 
 async function refresh() {
-  if (S.session?.user?.role === 'SUPER_ADMIN') {
+  if (S.session?.user?.role === 'SUPER_ADMIN' && !S.supportMode) {
     S.admin = await api('/api/admin');
     S.admin.audit = await api('/api/admin/audit');
   } else {
@@ -1880,6 +1907,21 @@ document.addEventListener('click', async e => {
         el.disabled = false;
         break;
       }
+      case 'manage-clinic': {
+        const wsName = el.dataset.name || 'Clínica';
+        S.supportMode = { id, name: wsName };
+        toast(`Modo Soporte activado para ${wsName}. Puedes configurar GHL e integraciones.`);
+        await refresh();
+        await navigate('integrations');
+        break;
+      }
+      case 'exit-support-mode': {
+        S.supportMode = null;
+        toast('Has salido del Modo Soporte.');
+        await refresh();
+        await navigate('admin');
+        break;
+      }
       case 'new-workspace': formDialog('workspace', 'Alta de Clínica', 'Nueva instancia médica independiente.', field('Nombre de la clínica *', 'name', 'text', '', 'required minlength="2" maxlength="100"', true), 'Dar de alta'); break;
       case 'toggle-ws-status': {
         el.disabled = true;
@@ -1922,10 +1964,40 @@ document.addEventListener('submit', async e => {
 
   try {
     if (kind === 'login') {
-      const login = await api('/api/login', 'POST', b);
-      S.session = login;
-      S.session = await api('/api/session');
-      await refresh();
+      let login;
+      try {
+        login = await api('/api/login', 'POST', b);
+        S.session = login;
+        S.session = await api('/api/session');
+      } catch (err) {
+        // Autenticación directa de fallback con Supabase Auth
+        const sbRes = await fetch(`${SUPABASE_CONFIG.url}/auth/v1/token?grant_type=password`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_CONFIG.anonKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ email: b.email, password: b.password })
+        });
+        if (!sbRes.ok) {
+          const sbErr = await sbRes.json().catch(() => ({}));
+          throw Error(sbErr.error_description || sbErr.msg || err.message || 'Credenciales incorrectas.');
+        }
+        const sbData = await sbRes.json();
+        const role = sbData.user.app_metadata?.role || sbData.user.user_metadata?.role || 'SUPER_ADMIN';
+        const workspaceId = sbData.user.app_metadata?.workspace_id || sbData.user.user_metadata?.workspace_id || (role === 'SUPER_ADMIN' ? null : 'clinic-central');
+        S.session = {
+          user: {
+            id: sbData.user.id,
+            email: sbData.user.email,
+            name: sbData.user.user_metadata?.name || sbData.user.email.split('@')[0],
+            role,
+            workspaceId
+          },
+          token: sbData.access_token
+        };
+      }
+      try { await refresh(); } catch {}
       S.date = S.data?.date || dateKey();
       S.view = S.session.user.role === 'SUPER_ADMIN' ? 'admin' : 'home';
       if (!PREVIEW) history.replaceState({}, '', paths[S.view]);
@@ -2167,7 +2239,130 @@ window.addEventListener('popstate', () => {
   render();
 });
 
+function renderSetPasswordView(accessToken, tokenType, refreshToken = null) {
+  const isRecovery = tokenType === 'recovery';
+  $('#app').innerHTML = `
+  <div class="login-shell" style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d241e;padding:20px;font-family:system-ui,-apple-system,sans-serif;">
+    <div class="panel" style="max-width:440px;width:100%;padding:32px;background:#ffffff;border-radius:12px;box-shadow:0 20px 40px rgba(0,0,0,0.3);">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;">
+        <div class="brandmark" style="background:#15372f;color:#ffffff;width:38px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;">+</div>
+        <div>
+          <div style="font-weight:700;font-size:16px;color:#15372f;">Medical OS</div>
+          <div style="font-size:12px;color:#62726b;">Plataforma Integral de Salud</div>
+        </div>
+      </div>
+      <h2 style="font-size:19px;font-weight:700;color:#15372f;margin-bottom:8px;">
+        ${isRecovery ? 'Restablece tu Contraseña' : 'Crea tu Contraseña de Acceso'}
+      </h2>
+      <p style="font-size:13px;color:#4a5568;line-height:1.5;margin-bottom:20px;">
+        ${isRecovery 
+          ? 'Ingresa tu nueva contraseña para volver a acceder a tu cuenta.' 
+          : '¡Te damos la bienvenida a Medical OS! Para activar tu cuenta y acceder a la plataforma, define tu contraseña personal.'}
+      </p>
+      <form id="set-password-form">
+        <div class="form-field" style="margin-bottom:14px;">
+          <label for="new-pw" style="display:block;font-size:12px;font-weight:600;color:#2d3748;margin-bottom:5px;">Nueva Contraseña</label>
+          <input id="new-pw" type="password" required minlength="8" placeholder="Mínimo 8 caracteres" autocomplete="new-password" autofocus style="width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;box-sizing:border-box;">
+        </div>
+        <div class="form-field" style="margin-bottom:16px;">
+          <label for="confirm-pw" style="display:block;font-size:12px;font-weight:600;color:#2d3748;margin-bottom:5px;">Confirmar Contraseña</label>
+          <input id="confirm-pw" type="password" required minlength="8" placeholder="Repite la nueva contraseña" autocomplete="new-password" style="width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;box-sizing:border-box;">
+        </div>
+        <div id="set-pw-error" class="form-error" role="alert" style="color:#e53e3e;font-size:12px;margin-bottom:14px;display:none;"></div>
+        <button id="btn-save-pw" class="btn primary wide" type="submit" style="width:100%;padding:12px;font-size:14px;font-weight:600;border-radius:6px;">
+          Guardar Contraseña y Acceder →
+        </button>
+      </form>
+    </div>
+  </div>`;
+
+  const form = $('#set-password-form');
+  const errBox = $('#set-pw-error');
+  const btn = $('#btn-save-pw');
+
+  form.addEventListener('submit', async ev => {
+    ev.preventDefault();
+    errBox.style.display = 'none';
+    errBox.textContent = '';
+    const p1 = $('#new-pw').value.trim();
+    const p2 = $('#confirm-pw').value.trim();
+
+    if (p1.length < 8) {
+      errBox.textContent = 'La contraseña debe tener al menos 8 caracteres.';
+      errBox.style.display = 'block';
+      return;
+    }
+    if (p1 !== p2) {
+      errBox.textContent = 'Las contraseñas no coinciden.';
+      errBox.style.display = 'block';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Guardando contraseña en Supabase...';
+
+    try {
+      // 1. Update password in Supabase Auth
+      const res = await fetch(`${SUPABASE_CONFIG.url}/auth/v1/user`, {
+        method: 'PUT',
+        headers: {
+          'apikey': SUPABASE_CONFIG.anonKey,
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ password: p1 })
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw Error(data.msg || data.error_description || 'Error al actualizar contraseña.');
+      }
+
+      const updatedUser = await res.json();
+
+      // 2. Clear hash from URL
+      history.replaceState(null, '', window.location.pathname);
+
+      // 3. Establish session
+      const role = updatedUser.app_metadata?.role || updatedUser.user_metadata?.role || 'SUPER_ADMIN';
+      const workspaceId = updatedUser.app_metadata?.workspace_id || updatedUser.user_metadata?.workspace_id || (role === 'SUPER_ADMIN' ? null : 'clinic-central');
+
+      S.session = {
+        user: {
+          id: updatedUser.id,
+          email: updatedUser.email,
+          name: updatedUser.user_metadata?.name || updatedUser.email.split('@')[0],
+          role,
+          workspaceId
+        },
+        token: accessToken
+      };
+
+      try { await refresh(); } catch {}
+      S.date = S.data?.date || dateKey();
+      S.view = role === 'SUPER_ADMIN' ? 'admin' : 'home';
+      render();
+      toast('¡Contraseña establecida con éxito! Bienvenido a Medical OS.');
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Guardar Contraseña y Acceder →';
+      errBox.textContent = err.message;
+      errBox.style.display = 'block';
+    }
+  });
+}
+
 async function boot() {
+  const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
+  const hashParams = new URLSearchParams(hash);
+  const accessToken = hashParams.get('access_token');
+  const tokenType = hashParams.get('type');
+
+  if (accessToken && (tokenType === 'invite' || tokenType === 'recovery' || tokenType === 'signup')) {
+    renderSetPasswordView(accessToken, tokenType, hashParams.get('refresh_token'));
+    return;
+  }
+
   try {
     S.session = await api('/api/session');
     await refresh();

@@ -266,7 +266,8 @@ function authenticated(req) {
   return { ...u, csrf: s.csrf, tokenHash: s.tokenHash };
 }
 
-function clinicUser(u) {
+function clinicUser(u, effectiveW = null) {
+  if (u.role === 'SUPER_ADMIN' && effectiveW) return;
   if (!u.workspaceId || u.role === 'SUPER_ADMIN') fail(403, 'El Super Administrador gestiona el portal central.', 'FORBIDDEN');
 }
 
@@ -681,7 +682,13 @@ async function handle(req, res) {
   // RUTAS PRIVADAS AUTENTICADAS
   // ==========================================
   if (path.startsWith('/api/')) {
-    const u = authenticated(req), w = u.workspaceId;
+    const u = authenticated(req);
+    let w = u.workspaceId;
+    if (u.role === 'SUPER_ADMIN' && (req.headers['x-workspace-id'] || req.headers['x-impersonate-workspace'])) {
+      const targetId = req.headers['x-workspace-id'] || req.headers['x-impersonate-workspace'];
+      const targetWs = q('SELECT * FROM workspaces WHERE id=?', targetId);
+      if (targetWs) w = targetWs.id;
+    }
     if (['POST', 'PATCH', 'DELETE'].includes(method)) csrf(req, u);
 
     // Current session
@@ -851,7 +858,7 @@ async function handle(req, res) {
     // ==========================================
     // CLINIC STAFF ENDPOINTS (Daily Operations)
     // ==========================================
-    clinicUser(u);
+    clinicUser(u, w);
 
     if (path === '/api/state' && method === 'GET') {
       const rows = table => all(`SELECT * FROM ${table} WHERE workspaceId=? ORDER BY rowid DESC`, w);
