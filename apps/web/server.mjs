@@ -652,6 +652,17 @@ async function handle(req, res) {
     return json(res, 200, { user: publicUser(u), csrf: csrfToken }, { 'Set-Cookie': `clinic_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800` });
   }
 
+  // Password reset request
+  if (path === '/api/auth/reset-password' && method === 'POST') {
+    const b = await body(req);
+    const email = (b.email || '').trim().toLowerCase();
+    const u = q('SELECT id, name, email FROM users WHERE email=?', email);
+    if (u) {
+      audit(u, 'PASSWORD_RESET_REQUESTED', 'user', u.id, `Solicitud de restablecimiento de contraseña para ${u.email}.`);
+    }
+    return json(res, 200, { success: true, message: 'Si el correo está registrado, se han enviado las instrucciones.' });
+  }
+
   // Public record verification
   if (path.startsWith('/api/verify/') && method === 'GET') {
     const id = path.slice('/api/verify/'.length);
