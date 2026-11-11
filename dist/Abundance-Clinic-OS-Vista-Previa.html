@@ -2117,7 +2117,11 @@ document.addEventListener('click', async e => {
         await navigate('admin');
         break;
       }
-      case 'new-workspace': formDialog('workspace', 'Alta de Clínica', 'Nueva instancia médica independiente.', field('Nombre de la clínica *', 'name', 'text', '', 'required minlength="2" maxlength="100"', true), 'Dar de alta'); break;
+      case 'new-workspace': formDialog('workspace', 'Alta de Nueva Clínica', 'Registra la nueva clínica cliente y asigna sus credenciales de acceso iniciales.',
+        field('Nombre de la clínica *', 'name', 'text', '', 'required minlength="2" maxlength="100" placeholder="Ej. Centro Médico Palermo"', true) +
+        field('Correo del Administrador de la clínica *', 'adminEmail', 'email', '', 'required placeholder="contacto@clinicapalermo.com"') +
+        field('Contraseña inicial / temporal *', 'adminPassword', 'text', '', 'required minlength="8" placeholder="Ej. Palermo2026!"')
+      , 'Dar de alta clínica y usuario'); break;
       case 'toggle-ws-status': {
         el.disabled = true;
         const curStatus = el.dataset.status;

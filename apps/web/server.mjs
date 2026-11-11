@@ -737,10 +737,29 @@ async function handle(req, res) {
         status: 'ACTIVE',
         createdAt: now()
       };
+
+      const adminEmail = b.adminEmail ? text(b.adminEmail, 'Email del administrador', 3, 254).toLowerCase() : null;
+      const adminPassword = b.adminPassword ? text(b.adminPassword, 'Contraseña', 6, 200) : null;
+
       transaction(() => {
         put('workspaces', workspace);
         put('settings', { workspaceId: workspace.id, value: JSON.stringify(defaults) });
-        audit(u, 'WORKSPACE_CREATED', 'workspace', workspace.id, `Clínica ${workspace.name} dada de alta.`);
+
+        if (adminEmail && adminPassword) {
+          const salt = randomBytes(16).toString('hex');
+          const passwordHash = scryptSync(adminPassword, salt, 64).toString('hex');
+          put('users', {
+            id: uid(),
+            workspaceId: workspace.id,
+            role: 'CLINIC_ADMIN',
+            email: adminEmail,
+            name: `Admin ${workspace.name}`,
+            salt,
+            passwordHash
+          });
+        }
+
+        audit(u, 'WORKSPACE_CREATED', 'workspace', workspace.id, `Clínica ${workspace.name} dada de alta${adminEmail ? ' con usuario ' + adminEmail : ''}.`);
       });
       return json(res, 201, workspace);
     }
