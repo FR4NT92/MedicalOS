@@ -2359,6 +2359,11 @@ async function boot() {
   const tokenType = hashParams.get('type');
 
   if (accessToken && (tokenType === 'invite' || tokenType === 'recovery' || tokenType === 'signup')) {
+    if (accessToken.split('.').length !== 3) {
+      toast('El enlace de invitación está incompleto o fue recortado. Asegúrate de copiar el enlace entero con todo el token.', true);
+      loginPage();
+      return;
+    }
     renderSetPasswordView(accessToken, tokenType, hashParams.get('refresh_token'));
     return;
   }
