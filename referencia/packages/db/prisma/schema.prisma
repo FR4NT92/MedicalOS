@@ -1,0 +1,504 @@
+// ==============================================================================
+// CLINIC-OS PRISMA SCHEMA - MULTI-TENANT HEALTHCARE CRM
+// Compliance: Ley 26.529, Ley 25.326, HIPAA BAA Ready, UTC Standardized
+// ==============================================================================
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ------------------------------------------------------------------------------
+// ENUMS
+// ------------------------------------------------------------------------------
+
+enum UserRole {
+  CLINIC_ADMIN
+  DOCTOR
+  RECEPTIONIST
+  NURSE
+}
+
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  CONVERTED
+  ARCHIVED
+}
+
+enum PatientStatus {
+  LEAD_TRIAGE
+  SCHEDULED
+  ACTIVE
+  INACTIVE
+  DISCHARGED
+}
+
+enum TriageUrgency {
+  LOW
+  MEDIUM
+  HIGH
+  EMERGENCY
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum AppointmentType {
+  CONSULTATION
+  SURGERY
+  FOLLOW_UP
+  PROCEDURE
+  EMERGENCY
+}
+
+enum MedicalRecordType {
+  SOAP_NOTE
+  SURGICAL_NOTE
+  PRESCRIPTION_NOTE
+  AMENDMENT
+}
+
+enum PrescriptionStatus {
+  ACTIVE
+  DISPENSED
+  CANCELLED
+}
+
+enum InvoiceType {
+  FACTURA_A
+  FACTURA_B
+  FACTURA_C
+  NOTA_CREDITO_A
+  NOTA_CREDITO_B
+  NOTA_CREDITO_C
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  VOIDED
+  ERROR
+}
+
+enum CommunicationChannel {
+  WHATSAPP
+  INSTAGRAM
+  HIGHLEVEL
+  WEB_CHAT
+  PHONE
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+// ------------------------------------------------------------------------------
+// 1. MULTI-TENANT WORKSPACE ROOT
+// ------------------------------------------------------------------------------
+
+model Workspace {
+  id              String   @id @default(uuid())
+  name            String
+  slug            String   @unique
+  taxId           String?  // CUIT / NIF
+  brandColor      String   @default("#589972") // Clinic-OS default green
+  timezone        String   @default("America/Argentina/Buenos_Aires")
+  phone           String?
+  email           String?
+  address         String?
+  settings        Json?    // Integrations, AI models, WhatsApp Cloud API tokens
+  createdAt       DateTime @default(now()) @db.Timestamptz(6) // Always UTC
+  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
+
+  // Relations
+  members         User[]
+  leads           Lead[]
+  patients        Patient[]
+  appointments    Appointment[]
+  medicalRecords  MedicalRecord[]
+  prescriptions   Prescription[]
+  invoices        Invoice[]
+  evidenceEntries EvidenceLedgerEntry[]
+  webhookEvents   WebhookEvent[]
+  communicationLogs CommunicationLog[]
+  auditLogs         AuditLog[]
+
+  @@map("workspaces")
+}
+
+// ------------------------------------------------------------------------------
+// 2. CLINIC USER / MEMBER (RLS & SESSION)
+// ------------------------------------------------------------------------------
+
+model User {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  email           String
+  passwordHash    String?
+  name            String
+  role            UserRole  @default(DOCTOR)
+  specialty       String?   // e.g. "Cirugía Plástica", "Dermatología"
+  licenseNumber   String?   // Matrícula Nacional / Provincial
+  phone           String?
+  isActive        Boolean   @default(true)
+  googleCalendarToken Json? // OAuth2 tokens for bi-directional sync
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
+
+  // Relations
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  appointments    Appointment[] @relation("DoctorAppointments")
+  authoredRecords MedicalRecord[] @relation("AuthorMedicalRecords")
+  prescriptions   Prescription[] @relation("DoctorPrescriptions")
+
+  @@unique([workspaceId, email])
+  @@index([workspaceId, role])
+  @@map("users")
+}
+
+// ------------------------------------------------------------------------------
+// 3. PATIENT (CORE CRM & CLINICAL ENTITY)
+// ------------------------------------------------------------------------------
+
+
+model Lead {
+  id                  String        @id @default(uuid())
+  workspaceId         String
+  firstName           String
+  phone               String        // Phone with international format (e.g. +54911...)
+  email               String?
+  source              String?       // UTM, Instagram, WhatsApp, Referral
+  utmCampaign         String?
+  utmSource           String?
+  status              LeadStatus    @default(NEW)
+  
+  // AI Triage extraction
+  triageUrgency       TriageUrgency @default(LOW)
+  triageNotes         String?       @db.Text
+  triageSymptoms      String[]      @default([])
+  preferredSchedule   String?       // e.g. "Tardes"
+
+  createdAt           DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime      @updatedAt @db.Timestamptz(6)
+
+  workspace           Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  communicationLogs   CommunicationLog[]
+
+  @@unique([workspaceId, phone])
+  @@index([workspaceId, status])
+  @@map("leads")
+}
+
+
+model Patient {
+  id                  String        @id @default(uuid())
+  workspaceId         String
+  firstName           String
+  lastName            String
+  dni                 String?       // Documento Nacional de Identidad
+  email               String?
+  phone               String        // Phone with international format (e.g. +54911...)
+  dateOfBirth         DateTime?     @db.Date
+  gender              String?
+  status              PatientStatus @default(LEAD_TRIAGE)
+  
+  // Health Insurance / Prepaga
+  healthInsuranceName String?       // e.g. "OSDE", "Swiss Medical", "Galeno", "Particular"
+  healthInsurancePlan String?       // e.g. "310", "SMG20"
+  affiliateNumber     String?       // Nro de Credencial / Afiliado
+  insuranceValidUntil DateTime?     @db.Timestamptz(6)
+  insuranceValidated  Boolean       @default(false)
+
+  // AI Medical Triage Extraction
+  triageUrgency       TriageUrgency @default(LOW)
+  triageNotes         String?       @db.Text
+  triageSymptoms      String[]      @default([])
+  preferredSchedule   String?       // e.g. "Tardes", "Lunes y Miércoles por la mañana"
+  triageSource        CommunicationChannel @default(WHATSAPP)
+
+  // GoHighLevel v2 synchronization
+  ghlContactId        String?
+  ghlTags             String[]      @default([])
+
+  // Financial balance
+  balance             Decimal       @default(0.0) @db.Decimal(12, 2)
+
+  createdAt           DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime      @updatedAt @db.Timestamptz(6)
+
+  // Relations
+  workspace           Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  appointments        Appointment[]
+  medicalRecords      MedicalRecord[]
+  prescriptions       Prescription[]
+  invoices            Invoice[]
+  evidenceEntries     EvidenceLedgerEntry[]
+  communicationLogs   CommunicationLog[]
+
+  @@unique([workspaceId, phone])
+  @@index([workspaceId, dni])
+  @@index([workspaceId, status])
+  @@index([workspaceId, triageUrgency])
+  @@map("patients")
+}
+
+// ------------------------------------------------------------------------------
+// 4. APPOINTMENT (STRICT UTC SCHEDULING & CONCURRENCY GUARD)
+// ------------------------------------------------------------------------------
+
+model Appointment {
+  id                  String            @id @default(uuid())
+  workspaceId         String
+  patientId           String
+  doctorId            String
+  startTime           DateTime          @db.Timestamptz(6) // Stored strictly in UTC
+  endTime             DateTime          @db.Timestamptz(6) // Stored strictly in UTC
+  type                AppointmentType   @default(CONSULTATION)
+  status              AppointmentStatus @default(PENDING)
+  notes               String?           @db.Text
+  
+  // External Calendar & HighLevel Synchronization
+  googleEventId       String?
+  googleSyncTimestamp DateTime?         @db.Timestamptz(6)
+  ghlAppointmentId    String?
+
+  // Automation reminders tracking (24h & 2h before startTime)
+  reminder24hSent     Boolean           @default(false)
+  reminder2hSent      Boolean           @default(false)
+  remindersScheduled  Boolean           @default(false)
+
+  createdAt           DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime          @updatedAt @db.Timestamptz(6)
+
+  // Relations
+  workspace           Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  patient             Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor              User              @relation("DoctorAppointments", fields: [doctorId], references: [id])
+  invoices            Invoice[]
+
+  // Concurrency and query optimization
+  @@index([workspaceId, doctorId, startTime, endTime])
+  @@index([workspaceId, patientId])
+  @@index([workspaceId, status, startTime])
+  @@map("appointments")
+}
+
+// ------------------------------------------------------------------------------
+// 5. MEDICAL RECORD (APPEND-ONLY HCE & AMENDMENTS FOR LEGAL COMPLIANCE)
+// ------------------------------------------------------------------------------
+
+model MedicalRecord {
+  id                  String            @id @default(uuid())
+  workspaceId         String
+  patientId           String
+  authorId            String
+  type                MedicalRecordType @default(SOAP_NOTE)
+  
+  // Clinical Data (SOAP: Subjective, Objective, Assessment, Plan)
+  content             Json              // Structured clinical narrative
+  diagnosisICD10      String?           // CIE-10 Code
+  diagnosisDescription String?
+  
+  // Digital Signature / Hash for Legal Integrity
+  contentSha256       String            // SHA-256 hash of content at creation
+  isSigned            Boolean           @default(false)
+  signedAt            DateTime?         @db.Timestamptz(6)
+
+  // Immutability & Audit Trail
+  originalRecordId    String?           // Set ONLY if type == AMENDMENT
+  isAmended           Boolean           @default(false)
+  amendmentReason     String?           @db.Text
+
+  createdAt           DateTime          @default(now()) @db.Timestamptz(6) // Strictly UTC
+  updatedAt           DateTime          @updatedAt @db.Timestamptz(6)
+
+  // Relations
+  workspace           Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  patient             Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  author              User              @relation("AuthorMedicalRecords", fields: [authorId], references: [id])
+  originalRecord      MedicalRecord?    @relation("RecordAmendments", fields: [originalRecordId], references: [id])
+  amendments          MedicalRecord[]   @relation("RecordAmendments")
+  prescriptions       Prescription[]
+
+  @@index([workspaceId, patientId, createdAt])
+  @@index([workspaceId, originalRecordId])
+  @@map("medical_records")
+}
+
+// ------------------------------------------------------------------------------
+// 6. PRESCRIPTION (DIGITAL QR & PHARMACY COMPLIANCE - LEY 27.553)
+// ------------------------------------------------------------------------------
+
+model Prescription {
+  id                  String             @id @default(uuid())
+  workspaceId         String
+  patientId           String
+  doctorId            String
+  medicalRecordId     String?
+  prescriptionNumber  String             // Unique sequential prescription serial
+  medications         Json               // Array of { drug, generic, dosage, frequency, days }
+  diagnosis           String?
+  instructions        String?            @db.Text
+  qrValidationCode    String             @unique // Verification token for public validation URL
+  status              PrescriptionStatus @default(ACTIVE)
+  dispensedAt         DateTime?          @db.Timestamptz(6)
+  expiresAt           DateTime           @db.Timestamptz(6)
+  createdAt           DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime           @updatedAt @db.Timestamptz(6)
+
+  // Relations
+  workspace           Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  patient             Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor              User               @relation("DoctorPrescriptions", fields: [doctorId], references: [id])
+  medicalRecord       MedicalRecord?     @relation(fields: [medicalRecordId], references: [id])
+
+  @@unique([workspaceId, prescriptionNumber])
+  @@index([workspaceId, patientId])
+  @@map("prescriptions")
+}
+
+// ------------------------------------------------------------------------------
+// 7. INVOICE (ARCA / AFIP FISCAL WEBSERVICE READY)
+// ------------------------------------------------------------------------------
+
+model Invoice {
+  id                  String        @id @default(uuid())
+  workspaceId         String
+  patientId           String
+  appointmentId       String?
+  invoiceType         InvoiceType   @default(FACTURA_B)
+  pointOfSale         Int           @default(4) // Punto de venta fiscal (e.g. 0004)
+  invoiceNumber       Int?          // Número de comprobante asignado por ARCA
+  
+  // ARCA Electronic Authorization Code
+  caeNumber           String?       // Código de Autorización Electrónico
+  caeVoidDate         DateTime?     @db.Date // Vencimiento del CAE
+  
+  // Amounts
+  currency            String        @default("ARS")
+  netAmount           Decimal       @db.Decimal(12, 2)
+  vatAmount           Decimal       @default(0.0) @db.Decimal(12, 2)
+  totalAmount         Decimal       @db.Decimal(12, 2)
+  
+  status              InvoiceStatus @default(DRAFT)
+  fiscalPayload       Json?         // Full payload submitted/received from ARCA
+  rejectionReason     String?       @db.Text
+
+  createdAt           DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime      @updatedAt @db.Timestamptz(6)
+
+  // Relations
+  workspace           Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  patient             Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  appointment         Appointment?  @relation(fields: [appointmentId], references: [id])
+
+  @@unique([workspaceId, pointOfSale, invoiceType, invoiceNumber])
+  @@index([workspaceId, patientId])
+  @@index([workspaceId, status])
+  @@map("invoices")
+}
+
+// ------------------------------------------------------------------------------
+// 8. EVIDENCE LEDGER (ClinicOS AI NATIVE MEDICAL TRIAGE)
+// ------------------------------------------------------------------------------
+
+model EvidenceLedgerEntry {
+  id                String    @id @default(uuid())
+  workspaceId       String
+  patientId         String
+  sourceMessageId   String?   // Reference to incoming message
+  fieldName         String    // e.g. "triageUrgency", "symptoms", "healthInsurance", "preferredSlot"
+  extractedValue    String    // The structured value extracted by GPT-4o
+  confidence        Float     // Confidence score: 0.0 to 1.0
+  evidenceQuote     String    @db.Text // Exact verbatim quote from patient conversation
+  verifiedByHuman   Boolean   @default(false)
+  verifiedByUserId  String?
+  createdAt         DateTime  @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  patient           Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, patientId, fieldName])
+  @@map("evidence_ledger_entries")
+}
+
+// ------------------------------------------------------------------------------
+// 9. WEBHOOK EVENTS & OMNICHANNEL LOGS
+// ------------------------------------------------------------------------------
+
+model WebhookEvent {
+  id              String               @id @default(uuid())
+  workspaceId     String
+  channel         CommunicationChannel
+  externalEventId String?              // ID from Meta / WhatsApp / Google
+  payload         Json
+  status          WebhookStatus        @default(RECEIVED)
+  errorMessage    String?              @db.Text
+  processedAt     DateTime?            @db.Timestamptz(6)
+  createdAt       DateTime             @default(now()) @db.Timestamptz(6)
+
+  workspace       Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, channel, status])
+  @@map("webhook_events")
+}
+
+model CommunicationLog {
+  id            String               @id @default(uuid())
+  workspaceId   String
+  patientId     String?
+  leadId        String?
+  channel       CommunicationChannel @default(WHATSAPP)
+  direction     String               // "INBOUND" or "OUTBOUND"
+  sender        String               // Phone or handle
+  messageText   String               @db.Text
+  rawMetadata   Json?
+  createdAt     DateTime             @default(now()) @db.Timestamptz(6)
+
+  workspace     Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  patient       Patient?             @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  lead          Lead?                @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, patientId, createdAt])
+  @@map("communication_logs")
+}
+
+// ------------------------------------------------------------------------------
+// 10. SYSTEM AUDIT TRAIL (LEY 26.529 COMPLIANCE - INMUTABLE ACCESS LOGS)
+// ------------------------------------------------------------------------------
+
+model AuditLog {
+  id              String   @id @default(uuid())
+  workspaceId     String
+  userId          String
+  patientId       String?
+  action          String   // e.g., "VIEW_HCE", "EXPORT_DATA", "AMEND_RECORD"
+  resource        String   // e.g., "MedicalRecord", "PatientProfile"
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  @@index([workspaceId, patientId, createdAt])
+  @@index([workspaceId, userId, action])
+  @@map("audit_logs")
+}

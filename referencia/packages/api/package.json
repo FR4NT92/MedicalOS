@@ -1,0 +1,19 @@
+{
+  "name": "@clinic-os/api",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@clinic-os/db": "workspace:*",
+    "@clinic-os/ai-agent": "workspace:*",
+    "@trpc/server": "^10.45.2",
+    "@trpc/client": "^10.45.2",
+    "superjson": "^2.2.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "typescript": "^5.4.5"
+  }
+}

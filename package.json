@@ -7,7 +7,6 @@
   "packageManager": "pnpm@9.15.9",
   "scripts": {
     "dev": "node apps/web/server.mjs",
-    "start": "node apps/web/server.mjs",
     "test": "node --test tests/production.test.mjs",
     "build": "node scripts/build.mjs"
   }

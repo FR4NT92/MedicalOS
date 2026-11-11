@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL with HL7 FHIR and RLS Schema
+  postgres:
+    image: postgres:16-alpine
+    container_name: abundance-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: abundance_clinic
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./supabase/migrations/20260924000000_init_abundance_schema.sql:/docker-entrypoint-initdb.d/01_init.sql
+      - ./supabase/migrations/20260924010000_auth_jwt_multitenant_hook.sql:/docker-entrypoint-initdb.d/02_auth_hook.sql
+      - ./supabase/seed.sql:/docker-entrypoint-initdb.d/03_seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. FastAPI Core Backend & WebSocket Stream
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: abundance-api
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/abundance_clinic
+      - PHI_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GHL_CLIENT_ID=${GHL_CLIENT_ID}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # 3. Next.js Frontend (Bauhaus Digital Console)
+  web:
+    build:
+      context: .
+      dockerfile: ./apps/web/Dockerfile
+    container_name: abundance-web
+    restart: always
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_AUDIO_URL=ws://localhost:8000/api/v1/audio/stream
+      - NEXT_PUBLIC_SUPABASE_URL=http://localhost:5432
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=mock-anon-key
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

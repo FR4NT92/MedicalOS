@@ -1,0 +1,32 @@
+{
+  "name": "abundance-clinic-os",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Abundance Clinic OS - B2B2C Multitenant Clinical Operations System (HL7 FHIR, GHL v2, Medical Copilot)",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "devDependencies": {
+    "prettier": "^3.2.5",
+    "prisma": "8.0.0-rc.19",
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "dependencies": {
+    "@supabase/ssr": "^0.12.7"
+  },
+  "pnpm": {
+  "overrides": {
+    "@tanstack/react-query": "4.36.1"
+    }
+  }
+}
