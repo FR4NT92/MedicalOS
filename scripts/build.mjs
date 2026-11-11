@@ -47,6 +47,7 @@ if (existsSync(join(pub, 'index.html')) && existsSync(join(pub, 'preview-adapter
       .replace('<link rel="icon" href="/favicon.svg" type="image/svg+xml">', '')
       .replace('<script src="/app.js" defer></script>', `<script>window.CLINIC_PREVIEW=true;window.CLINIC_SEED=${JSON.stringify(seed).replace(/</g, '\\u003c')};</script>\n<script>${script(preview)}</script>\n<script>${script(js)}</script>`);
     writeFileSync(join(out, 'Abundance-Clinic-OS-Vista-Previa.html'), html);
+    writeFileSync(join(out, 'index.html'), html);
   } catch (err) {
     console.warn('[preview bundle warning]', err.message);
   }

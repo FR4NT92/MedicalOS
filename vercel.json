@@ -1,12 +1,8 @@
 {
-  "version": 2,
   "buildCommand": "node scripts/build.mjs",
   "outputDirectory": "dist",
+  "cleanUrls": true,
   "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/index.mjs"
-    },
     {
       "source": "/(.*)",
       "destination": "/index.html"
