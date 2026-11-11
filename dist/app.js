@@ -307,19 +307,19 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     }).catch(() => {});
 
     if (body.adminEmail && body.adminPassword) {
-      await fetch(`${SUPABASE_CONFIG.url}/rest/v1/users`, {
+      const userRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/rpc/create_clinic_user`, {
         method: 'POST',
         headers: authHeaders,
         body: JSON.stringify({
-          id: 'usr-' + makeId().slice(0, 8),
-          workspace_id: newWs.id,
-          role: 'CLINIC_ADMIN',
-          email: body.adminEmail.toLowerCase().trim(),
-          name: `Admin ${newWs.name}`,
-          salt: 'supabase_managed',
-          password_hash: 'managed'
+          p_email: body.adminEmail.toLowerCase().trim(),
+          p_password: body.adminPassword.trim(),
+          p_name: `Admin ${newWs.name}`,
+          p_workspace_id: newWs.id
         })
-      }).catch(() => {});
+      });
+      if (!userRes.ok) {
+        console.warn('[create_clinic_user warning]', await userRes.text());
+      }
     }
 
     await fetch(`${SUPABASE_CONFIG.url}/rest/v1/audit_logs`, {
