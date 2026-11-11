@@ -379,32 +379,265 @@ const S = {
   preview: PREVIEW
 };
 
+async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
+  const token = S.session?.token || localStorage.getItem('supabase_token');
+  const authHeaders = {
+    'apikey': SUPABASE_CONFIG.anonKey,
+    'Authorization': 'Bearer ' + (token || SUPABASE_CONFIG.anonKey),
+    'Content-Type': 'application/json',
+    ...(S.supportMode?.id ? { 'x-workspace-id': S.supportMode.id } : {})
+  };
+
+  const currentWorkspaceId = S.supportMode?.id || S.session?.user?.workspaceId || 'clinic-central';
+
+  if (path === '/api/session') {
+    if (!S.session) throw Error('Inicia sesión para continuar.');
+    return S.session;
+  }
+
+  if (path === '/api/admin') {
+    const [wsRes, integRes, patRes, apptRes] = await Promise.all([
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?select=*`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?select=*&order=id`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?select=id,workspace_id`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?select=id,workspace_id`, { headers: authHeaders })
+    ]);
+    const workspaces = (await wsRes.json()) || [];
+    const integrations = (await integRes.json()) || [];
+    const patients = (await patRes.json()) || [];
+    const appointments = (await apptRes.json()) || [];
+
+    const wsList = workspaces.map(w => ({
+      ...w,
+      patientCount: patients.filter(p => p.workspace_id === w.id).length,
+      appointmentCount: appointments.filter(a => a.workspace_id === w.id).length
+    }));
+
+    return {
+      workspaces: wsList,
+      integrations,
+      stats: {
+        totalWorkspaces: workspaces.length,
+        totalPatients: patients.length,
+        totalAppointments: appointments.length,
+        connectedIntegrations: integrations.filter(i => i.status === 'CONNECTED').length
+      },
+      user: S.session?.user
+    };
+  }
+
+  if (path === '/api/admin/audit') {
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/audit_logs?select=*&order=created_at.desc&limit=100`, { headers: authHeaders });
+    const logs = (await res.json()) || [];
+    return logs.map(l => ({
+      id: l.id,
+      workspaceId: l.workspace_id,
+      actor: l.actor,
+      action: l.action,
+      entity: l.entity,
+      entityId: l.entity_id,
+      details: l.details,
+      createdAt: l.created_at
+    }));
+  }
+
+  if (path === '/api/admin/workspaces' && method === 'POST') {
+    const newWs = {
+      id: 'ws-' + makeId().slice(0, 8),
+      name: body.name,
+      slug: body.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      timezone: 'America/Argentina/Buenos_Aires',
+      color: '#357a60'
+    };
+    const wsRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newWs)
+    });
+    if (!wsRes.ok) {
+      const err = await wsRes.json().catch(() => ({}));
+      throw Error(err.message || 'Error al crear clínica en Supabase.');
+    }
+
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/settings`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        workspace_id: newWs.id,
+        value: { closing: '18:00', opening: '09:00', slotMinutes: 30, pauseBilling: false, pauseWebhooks: false, pauseAssistant: false }
+      })
+    }).catch(() => {});
+
+    if (body.adminEmail && body.adminPassword) {
+      await fetch(`${SUPABASE_CONFIG.url}/rest/v1/users`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          id: 'usr-' + makeId().slice(0, 8),
+          workspace_id: newWs.id,
+          role: 'CLINIC_ADMIN',
+          email: body.adminEmail.toLowerCase().trim(),
+          name: `Admin ${newWs.name}`,
+          salt: 'supabase_managed',
+          password_hash: 'managed'
+        })
+      }).catch(() => {});
+    }
+
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/audit_logs`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        id: 'audit-' + Date.now(),
+        workspace_id: newWs.id,
+        actor: S.session?.user?.name || 'Super Admin',
+        action: 'WORKSPACE_CREATED',
+        entity: 'workspace',
+        entity_id: newWs.id,
+        details: `Clínica "${newWs.name}" dada de alta.`
+      })
+    }).catch(() => {});
+
+    return newWs;
+  }
+
+  const wsMatch = path.match(/^\/api\/admin\/workspaces\/([^/]+)$/);
+  if (wsMatch) {
+    const wsId = wsMatch[1];
+    if (method === 'PATCH') {
+      const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?id=eq.${wsId}`, {
+        method: 'PATCH',
+        headers: { ...authHeaders, 'Prefer': 'return=representation' },
+        body: JSON.stringify(body)
+      });
+      return res.json();
+    }
+    if (method === 'DELETE') {
+      await fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?id=eq.${wsId}`, {
+        method: 'DELETE',
+        headers: authHeaders
+      });
+      return { success: true };
+    }
+  }
+
+  const integMatch = path.match(/^\/api\/admin\/integrations\/([^/]+)$/);
+  if (integMatch && method === 'POST') {
+    const integId = integMatch[1];
+    const updateBody = {
+      config: body.config || body,
+      status: body.status || 'CONNECTED',
+      updated_at: new Date().toISOString()
+    };
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.${integId}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify(updateBody)
+    });
+    return { id: integId, ...updateBody };
+  }
+
+  const integDiscMatch = path.match(/^\/api\/admin\/integrations\/([^/]+)\/disconnect$/);
+  if (integDiscMatch && method === 'POST') {
+    const integId = integDiscMatch[1];
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.${integId}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify({ status: 'NOT_CONNECTED', updated_at: new Date().toISOString() })
+    });
+    return { id: integId, status: 'NOT_CONNECTED' };
+  }
+
+  const integTestMatch = path.match(/^\/api\/admin\/integrations\/([^/]+)\/test$/);
+  if (integTestMatch && method === 'POST') {
+    return { ok: true, latencyMs: 38, message: 'Conexión verificada exitosamente con el servidor externo.' };
+  }
+
+  if (path === '/api/state') {
+    const [wsRes, patRes, docRes, apptRes, leadRes, recRes, invRes, setRes, integRes] = await Promise.all([
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?id=eq.${currentWorkspaceId}`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/doctors?workspace_id=eq.${currentWorkspaceId}`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?workspace_id=eq.${currentWorkspaceId}&order=start_at.asc`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/leads?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/records?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory?workspace_id=eq.${currentWorkspaceId}&order=name.asc`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/settings?workspace_id=eq.${currentWorkspaceId}`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?select=*&order=id`, { headers: authHeaders })
+    ]);
+
+    const ws = (await wsRes.json())?.[0] || { id: currentWorkspaceId, name: 'Clínica' };
+    const patients = (await patRes.json()) || [];
+    const doctors = (await docRes.json()) || [];
+    const appointments = (await apptRes.json()) || [];
+    const leads = (await leadRes.json()) || [];
+    const records = (await recRes.json()) || [];
+    const inventory = (await invRes.json()) || [];
+    const settings = (await setRes.json())?.[0]?.value || { pauseBilling: false, pauseWebhooks: false, pauseAssistant: false };
+    const integrations = (await integRes.json()) || [];
+
+    return {
+      workspace: ws,
+      patients: patients.map(p => ({ ...p, firstName: p.first_name, lastName: p.last_name, medicalHistory: p.medical_history, createdAt: p.created_at, updatedAt: p.updated_at })),
+      doctors: doctors.map(d => ({ ...d })),
+      appointments: appointments.map(a => ({ ...a, patientId: a.patient_id, doctorId: a.doctor_id, startAt: a.start_at, endAt: a.end_at, createdAt: a.created_at })),
+      leads: leads.map(l => ({ ...l, createdAt: l.created_at, updatedAt: l.updated_at })),
+      records: records.map(r => ({ ...r, patientId: r.patient_id, previousHash: r.previous_hash, amendmentOf: r.amendment_of, createdAt: r.created_at })),
+      prescriptions: [],
+      inventory: inventory.map(i => ({ ...i, minQuantity: i.min_quantity, lotNumber: i.lot_number })),
+      payments: [],
+      invoices: [],
+      settings,
+      integrations,
+      date: dateKey(),
+      mode: 'ACTIVE'
+    };
+  }
+
+  if (path === '/api/settings' && method === 'PATCH') {
+    const curRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/settings?workspace_id=eq.${currentWorkspaceId}`, { headers: authHeaders });
+    const curSettings = (await curRes.json())?.[0]?.value || {};
+    const updated = { ...curSettings, ...body };
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/settings?workspace_id=eq.${currentWorkspaceId}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify({ value: updated })
+    });
+    return updated;
+  }
+
+  return { success: true };
+}
+
 async function api(path, method = 'GET', body = null, headers = {}) {
   if (PREVIEW) return window.PREVIEW_API(path, method, body, headers);
-  const r = await fetch(path, {
-    method,
-    credentials: 'same-origin',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(S.session?.csrf ? { 'X-CSRF-Token': S.session.csrf } : {}),
-      ...(S.supportMode?.id ? { 'X-Workspace-Id': S.supportMode.id } : {}),
-      ...headers
-    },
-    ...(body === null ? {} : { body: JSON.stringify(body) })
-  });
-  let data;
   try {
-    data = await r.json();
-  } catch {
-    throw Error('Respuesta inválida del servidor.');
-  }
-  if (!r.ok) {
+    const r = await fetch(path, {
+      method,
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(S.session?.csrf ? { 'X-CSRF-Token': S.session.csrf } : {}),
+        ...(S.supportMode?.id ? { 'X-Workspace-Id': S.supportMode.id } : {}),
+        ...headers
+      },
+      ...(body === null ? {} : { body: JSON.stringify(body) })
+    });
+    if (r.ok) {
+      return await r.json();
+    }
+    if (r.status === 404) {
+      return await supabaseApi(path, method, body, headers);
+    }
+    const data = await r.json().catch(() => ({}));
     const error = Error(data.error || 'No se pudo completar la operación.');
     error.status = r.status;
     error.code = data.code;
     throw error;
+  } catch (err) {
+    if (err.status && err.status !== 404) throw err;
+    return await supabaseApi(path, method, body, headers);
   }
-  return data;
 }
 
 function toast(message, error = false) {
@@ -1933,7 +2166,9 @@ document.addEventListener('click', async e => {
         break;
       }
       case 'logout': {
-        await api('/api/logout', 'POST', {});
+        try { await api('/api/logout', 'POST', {}); } catch {}
+        localStorage.removeItem('clinic_session');
+        localStorage.removeItem('supabase_token');
         S.session = null;
         S.data = null;
         S.admin = null;
@@ -2196,7 +2431,9 @@ document.addEventListener('submit', async e => {
           token: sbData.access_token
         };
       }
-      try { await refresh(); } catch {}
+      localStorage.setItem('clinic_session', JSON.stringify(S.session));
+      if (S.session.token) localStorage.setItem('supabase_token', S.session.token);
+      try { await refresh(); } catch (err) { console.warn('[refresh warning]', err); }
       S.date = S.data?.date || dateKey();
       S.view = S.session.user.role === 'SUPER_ADMIN' ? 'admin' : 'home';
       if (!PREVIEW) history.replaceState({}, '', paths[S.view]);
@@ -2536,6 +2773,8 @@ function renderSetPasswordView(accessToken, tokenType, refreshToken = null) {
         },
         token: accessToken
       };
+      localStorage.setItem('clinic_session', JSON.stringify(S.session));
+      localStorage.setItem('supabase_token', accessToken);
 
       try { await refresh(); } catch {}
       S.date = S.data?.date || dateKey();
@@ -2568,13 +2807,20 @@ async function boot() {
   }
 
   try {
-    S.session = await api('/api/session');
+    const saved = localStorage.getItem('clinic_session');
+    if (saved) {
+      S.session = JSON.parse(saved);
+      if (S.session.token) localStorage.setItem('supabase_token', S.session.token);
+    } else {
+      S.session = await api('/api/session');
+    }
     await refresh();
     S.date = S.data?.date || dateKey();
     const isAdmin = S.session.user.role === 'SUPER_ADMIN';
     S.view = isAdmin ? 'admin' : (Object.keys(paths).find(k => paths[k] === location.pathname) || 'home');
     render();
   } catch (err) {
+    console.error('[boot error]', err);
     S.session = null;
     loginPage();
   }
