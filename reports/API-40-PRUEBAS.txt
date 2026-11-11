@@ -1,0 +1,259 @@
+TAP version 13
+# (node:2067) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Clinic-OS: pruebas reales contra HTTP y SQLite (solo datos ficticios)
+    # Subtest: 01 · health identifica demo y no declara integraciones activas
+    ok 1 - 01 · health identifica demo y no declara integraciones activas
+      ---
+      duration_ms: 8.86566
+      type: 'test'
+      ...
+    # Subtest: 02 · API privada rechaza solicitudes sin sesión
+    ok 2 - 02 · API privada rechaza solicitudes sin sesión
+      ---
+      duration_ms: 3.07026
+      type: 'test'
+      ...
+    # Subtest: 03 · credenciales incorrectas no acceden por fallback
+    ok 3 - 03 · credenciales incorrectas no acceden por fallback
+      ---
+      duration_ms: 51.37155
+      type: 'test'
+      ...
+    # Subtest: 04 · cookie de acceso HttpOnly y SameSite=Strict
+    ok 4 - 04 · cookie de acceso HttpOnly y SameSite=Strict
+      ---
+      duration_ms: 46.343175
+      type: 'test'
+      ...
+    # Subtest: 05 · estado inicial lee pacientes y turnos desde SQLite
+    ok 5 - 05 · estado inicial lee pacientes y turnos desde SQLite
+      ---
+      duration_ms: 3.356039
+      type: 'test'
+      ...
+    # Subtest: 06 · estado público de la sesión no expone hash de contraseña
+    ok 6 - 06 · estado público de la sesión no expone hash de contraseña
+      ---
+      duration_ms: 3.370115
+      type: 'test'
+      ...
+    # Subtest: 07 · una clínica no puede abrir administración central
+    ok 7 - 07 · una clínica no puede abrir administración central
+      ---
+      duration_ms: 1.829347
+      type: 'test'
+      ...
+    # Subtest: 08 · Super Admin no puede leer datos clínicos
+    ok 8 - 08 · Super Admin no puede leer datos clínicos
+      ---
+      duration_ms: 1.297107
+      type: 'test'
+      ...
+    # Subtest: 09 · segunda clínica recibe únicamente su paciente
+    ok 9 - 09 · segunda clínica recibe únicamente su paciente
+      ---
+      duration_ms: 2.956198
+      type: 'test'
+      ...
+    # Subtest: 10 · un header de workspace falsificado no cambia el tenant
+    ok 10 - 10 · un header de workspace falsificado no cambia el tenant
+      ---
+      duration_ms: 3.332273
+      type: 'test'
+      ...
+    # Subtest: 11 · mutaciones exigen CSRF de la sesión
+    ok 11 - 11 · mutaciones exigen CSRF de la sesión
+      ---
+      duration_ms: 2.250068
+      type: 'test'
+      ...
+    # Subtest: 12 · se rechaza un origen externo
+    ok 12 - 12 · se rechaza un origen externo
+      ---
+      duration_ms: 4.211573
+      type: 'test'
+      ...
+    # Subtest: 13 · rechaza nombres de host ajenos a loopback
+    ok 13 - 13 · rechaza nombres de host ajenos a loopback
+      ---
+      duration_ms: 9.3179
+      type: 'test'
+      ...
+    # Subtest: 14 · crea paciente sin apellido y persiste
+    ok 14 - 14 · crea paciente sin apellido y persiste
+      ---
+      duration_ms: 7.112498
+      type: 'test'
+      ...
+    # Subtest: 15 · evita duplicar teléfono dentro de una clínica
+    ok 15 - 15 · evita duplicar teléfono dentro de una clínica
+      ---
+      duration_ms: 3.257451
+      type: 'test'
+      ...
+    # Subtest: 16 · editar un paciente de otra clínica devuelve 404
+    ok 16 - 16 · editar un paciente de otra clínica devuelve 404
+      ---
+      duration_ms: 2.003167
+      type: 'test'
+      ...
+    # Subtest: 17 · una fecha inválida no crea un turno
+    ok 17 - 17 · una fecha inválida no crea un turno
+      ---
+      duration_ms: 1.947534
+      type: 'test'
+      ...
+    # Subtest: 18 · crea turno con fecha y zona horaria explícitas
+    ok 18 - 18 · crea turno con fecha y zona horaria explícitas
+      ---
+      duration_ms: 3.087135
+      type: 'test'
+      ...
+    # Subtest: 19 · detecta solapamiento que contiene por completo otro turno
+    ok 19 - 19 · detecta solapamiento que contiene por completo otro turno
+      ---
+      duration_ms: 2.871111
+      type: 'test'
+      ...
+    # Subtest: 20 · otro profesional puede atender a otro paciente a la misma hora
+    ok 20 - 20 · otro profesional puede atender a otro paciente a la misma hora
+      ---
+      duration_ms: 2.929017
+      type: 'test'
+      ...
+    # Subtest: 21 · un mismo paciente no puede superponer turnos
+    ok 21 - 21 · un mismo paciente no puede superponer turnos
+      ---
+      duration_ms: 1.536241
+      type: 'test'
+      ...
+    # Subtest: 22 · cancelar libera el horario del profesional
+    ok 22 - 22 · cancelar libera el horario del profesional
+      ---
+      duration_ms: 6.712754
+      type: 'test'
+      ...
+    # Subtest: 23 · reactivar un turno cancelado también verifica conflictos
+    ok 23 - 23 · reactivar un turno cancelado también verifica conflictos
+      ---
+      duration_ms: 2.447334
+      type: 'test'
+      ...
+    # Subtest: 24 · no acepta un profesional de otra clínica
+    ok 24 - 24 · no acepta un profesional de otra clínica
+      ---
+      duration_ms: 1.588315
+      type: 'test'
+      ...
+    # Subtest: 25 · guarda una evolución SOAP con hash técnico
+    ok 25 - 25 · guarda una evolución SOAP con hash técnico
+      ---
+      duration_ms: 3.507256
+      type: 'test'
+      ...
+    # Subtest: 26 · la API no permite actualizar ni borrar evoluciones
+    ok 26 - 26 · la API no permite actualizar ni borrar evoluciones
+      ---
+      duration_ms: 5.233237
+      type: 'test'
+      ...
+    # Subtest: 27 · SQLite impide modificación de una evolución mediante trigger
+    ok 27 - 27 · SQLite impide modificación de una evolución mediante trigger
+      ---
+      duration_ms: 1.382045
+      type: 'test'
+      ...
+    # Subtest: 28 · enmienda conserva original y encadena hashes
+    ok 28 - 28 · enmienda conserva original y encadena hashes
+      ---
+      duration_ms: 3.303019
+      type: 'test'
+      ...
+    # Subtest: 29 · verificador público no filtra datos médicos ni identidad
+    ok 29 - 29 · verificador público no filtra datos médicos ni identidad
+      ---
+      duration_ms: 2.538
+      type: 'test'
+      ...
+    # Subtest: 30 · pago manual es idempotente y no afirma acreditación
+    ok 30 - 30 · pago manual es idempotente y no afirma acreditación
+      ---
+      duration_ms: 4.538895
+      type: 'test'
+      ...
+    # Subtest: 31 · la misma clave de pago con otro importe produce conflicto
+    ok 31 - 31 · la misma clave de pago con otro importe produce conflicto
+      ---
+      duration_ms: 2.077379
+      type: 'test'
+      ...
+    # Subtest: 32 · importes negativos o de más de dos decimales son rechazados
+    ok 32 - 32 · importes negativos o de más de dos decimales son rechazados
+      ---
+      duration_ms: 4.465925
+      type: 'test'
+      ...
+    # Subtest: 33 · comprobantes son borradores sin CAE
+    ok 33 - 33 · comprobantes son borradores sin CAE
+      ---
+      duration_ms: 2.593474
+      type: 'test'
+      ...
+    # Subtest: 34 · los conectores fallan cerrados sin acciones externas
+    ok 34 - 34 · los conectores fallan cerrados sin acciones externas
+      ---
+      duration_ms: 6.843534
+      type: 'test'
+      ...
+    # Subtest: 35 · pausa del asistente se aplica en el servidor
+    ok 35 - 35 · pausa del asistente se aplica en el servidor
+      ---
+      duration_ms: 8.896748
+      type: 'test'
+      ...
+    # Subtest: 36 · alta de clínica es exclusiva de Super Admin
+    ok 36 - 36 · alta de clínica es exclusiva de Super Admin
+      ---
+      duration_ms: 3.3908
+      type: 'test'
+      ...
+    # Subtest: 37 · un borrador de receta no se presenta como receta válida
+    ok 37 - 37 · un borrador de receta no se presenta como receta válida
+      ---
+      duration_ms: 2.129277
+      type: 'test'
+      ...
+    # Subtest: 38 · pacientes y pagos persisten al reiniciar el proceso
+    ok 38 - 38 · pacientes y pagos persisten al reiniciar el proceso
+      ---
+      duration_ms: 134.729875
+      type: 'test'
+      ...
+    # Subtest: 39 · el arranque en modo producción se rechaza
+    ok 39 - 39 · el arranque en modo producción se rechaza
+      ---
+      duration_ms: 68.576776
+      type: 'test'
+      ...
+    # Subtest: 40 · cerrar sesión invalida el acceso anterior
+    ok 40 - 40 · cerrar sesión invalida el acceso anterior
+      ---
+      duration_ms: 7.178908
+      type: 'test'
+      ...
+    1..40
+ok 1 - Clinic-OS: pruebas reales contra HTTP y SQLite (solo datos ficticios)
+  ---
+  duration_ms: 899.579611
+  type: 'suite'
+  ...
+1..1
+# tests 40
+# suites 1
+# pass 40
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 999.74443

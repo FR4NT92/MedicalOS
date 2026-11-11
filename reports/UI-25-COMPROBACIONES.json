@@ -1,0 +1,40 @@
+{
+  "passed": 25,
+  "checks": [
+    "Interfaz: login contra el servidor local",
+    "Diseño móvil sin desbordamiento, sidebar cerrado",
+    "Navegación móvil",
+    "Alta de paciente desde formulario",
+    "Búsqueda de pacientes",
+    "Edición de ficha",
+    "Alta de turno desde agenda",
+    "Error de conflicto visible en el formulario",
+    "Cambio de estado de turno",
+    "Reprogramación persistida",
+    "Evolución SOAP y verificación de hash",
+    "Enmienda sin sobrescribir el original",
+    "Registro manual de pago rotulado como demo",
+    "Borrador interno sin emisión fiscal",
+    "Contacto y cambio de etapa Kanban",
+    "Conector sin falso estado de éxito",
+    "Control operativo guardado en servidor",
+    "Asistente resume datos reales de la demo",
+    "Acceso diferenciado de Super Admin",
+    "Alta de workspace sin datos clínicos compartidos",
+    "Sin excepciones JavaScript en los flujos probados",
+    "HTML autocontenido renderiza sin servidor ni recursos externos",
+    "Hash de la vista previa coincide con SHA-256 independiente",
+    "Formulario de paciente en modo offline",
+    "Sin excepciones JavaScript en la vista previa"
+  ],
+  "harness": "Chromium renderizado con set_content. Interfaz conectada al HTTP local mediante puente Playwright/Python porque la navegación directa está bloqueada por políticas del entorno. No se modificaron políticas. La vista previa se renderizó como HTML autocontenido. No prueba navegación de red ni CSP en navegador de producción.",
+  "screenshots": [
+    "home.png",
+    "login.png",
+    "mobile.png",
+    "records.png",
+    "pipeline.png",
+    "integrations.png",
+    "admin.png"
+  ]
+}

@@ -13,8 +13,8 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-echo Clinic OS - DEMOSTRACION LOCAL. No ingresar datos reales.
-echo Cuando aparezca el mensaje de inicio, abre http://localhost:3000
+echo Abundance Clinic OS - Iniciando servidor...
+echo Abre tu navegador en: http://localhost:3000
 echo Para detener el servidor, presiona Ctrl+C.
 node apps/web/server.mjs
 pause
