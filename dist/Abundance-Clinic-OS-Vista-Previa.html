@@ -390,6 +390,39 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
 
   const currentWorkspaceId = S.supportMode?.id || S.session?.user?.workspaceId || 'clinic-central';
 
+  if (path === '/api/login' && method === 'POST') {
+    const sbRes = await fetch(`${SUPABASE_CONFIG.url}/auth/v1/token?grant_type=password`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_CONFIG.anonKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ email: body.email, password: body.password })
+    });
+    if (!sbRes.ok) {
+      const sbErr = await sbRes.json().catch(() => ({}));
+      throw Error(sbErr.error_description || sbErr.msg || 'Correo electrónico o contraseña incorrectos.');
+    }
+    const sbData = await sbRes.json();
+    const isSuper = ['frantruppa@gmail.com', 'bernaljohansss@gmail.com'].includes(sbData.user.email?.toLowerCase()) ||
+      sbData.user.app_metadata?.role === 'SUPER_ADMIN' ||
+      sbData.user.user_metadata?.role === 'SUPER_ADMIN';
+    const role = isSuper ? 'SUPER_ADMIN' : (sbData.user.app_metadata?.role || sbData.user.user_metadata?.role || 'CLINIC_ADMIN');
+    const workspaceId = isSuper ? null : (sbData.user.app_metadata?.workspace_id || sbData.user.user_metadata?.workspace_id || 'clinic-central');
+
+    return {
+      user: {
+        id: sbData.user.id,
+        email: sbData.user.email,
+        name: sbData.user.user_metadata?.name || sbData.user.email.split('@')[0],
+        role,
+        workspaceId
+      },
+      token: sbData.access_token,
+      csrf: 'sb'
+    };
+  }
+
   if (path === '/api/session') {
     if (!S.session) throw Error('Inicia sesión para continuar.');
     return S.session;
@@ -2398,44 +2431,14 @@ document.addEventListener('submit', async e => {
 
   try {
     if (kind === 'login') {
-      let login;
-      try {
-        login = await api('/api/login', 'POST', b);
-        S.session = login;
-        S.session = await api('/api/session');
-      } catch (err) {
-        // Autenticación directa de fallback con Supabase Auth
-        const sbRes = await fetch(`${SUPABASE_CONFIG.url}/auth/v1/token?grant_type=password`, {
-          method: 'POST',
-          headers: {
-            'apikey': SUPABASE_CONFIG.anonKey,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ email: b.email, password: b.password })
-        });
-        if (!sbRes.ok) {
-          const sbErr = await sbRes.json().catch(() => ({}));
-          throw Error(sbErr.error_description || sbErr.msg || err.message || 'Credenciales incorrectas.');
-        }
-        const sbData = await sbRes.json();
-        const role = sbData.user.app_metadata?.role || sbData.user.user_metadata?.role || 'SUPER_ADMIN';
-        const workspaceId = sbData.user.app_metadata?.workspace_id || sbData.user.user_metadata?.workspace_id || (role === 'SUPER_ADMIN' ? null : 'clinic-central');
-        S.session = {
-          user: {
-            id: sbData.user.id,
-            email: sbData.user.email,
-            name: sbData.user.user_metadata?.name || sbData.user.email.split('@')[0],
-            role,
-            workspaceId
-          },
-          token: sbData.access_token
-        };
-      }
+      const sessionObj = await api('/api/login', 'POST', b);
+      if (!sessionObj?.user) throw Error('No se pudo iniciar sesión. Verifica tus credenciales.');
+      S.session = sessionObj;
       localStorage.setItem('clinic_session', JSON.stringify(S.session));
       if (S.session.token) localStorage.setItem('supabase_token', S.session.token);
       try { await refresh(); } catch (err) { console.warn('[refresh warning]', err); }
       S.date = S.data?.date || dateKey();
-      S.view = S.session.user.role === 'SUPER_ADMIN' ? 'admin' : 'home';
+      S.view = S.session.user?.role === 'SUPER_ADMIN' ? 'admin' : 'home';
       if (!PREVIEW) history.replaceState({}, '', paths[S.view]);
       render();
       return;
@@ -2810,10 +2813,11 @@ async function boot() {
     const saved = localStorage.getItem('clinic_session');
     if (saved) {
       S.session = JSON.parse(saved);
-      if (S.session.token) localStorage.setItem('supabase_token', S.session.token);
+      if (S.session?.token) localStorage.setItem('supabase_token', S.session.token);
     } else {
       S.session = await api('/api/session');
     }
+    if (!S.session?.user) throw Error('Sesión inválida');
     await refresh();
     S.date = S.data?.date || dateKey();
     const isAdmin = S.session.user.role === 'SUPER_ADMIN';
@@ -2821,6 +2825,7 @@ async function boot() {
     render();
   } catch (err) {
     console.error('[boot error]', err);
+    localStorage.removeItem('clinic_session');
     S.session = null;
     loginPage();
   }
