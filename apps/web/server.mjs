@@ -47,38 +47,34 @@ CREATE TRIGGER IF NOT EXISTS records_no_delete BEFORE DELETE ON records BEGIN SE
 CREATE TABLE IF NOT EXISTS prescriptions(id TEXT PRIMARY KEY,workspaceId TEXT NOT NULL,patientId TEXT NOT NULL,content TEXT NOT NULL,status TEXT NOT NULL,createdAt TEXT NOT NULL,FOREIGN KEY(workspaceId,patientId) REFERENCES patients(workspaceId,id));
 CREATE TABLE IF NOT EXISTS consents(id TEXT PRIMARY KEY,workspaceId TEXT NOT NULL REFERENCES workspaces(id),patientId TEXT NOT NULL,doctorId TEXT NOT NULL,doctorName TEXT NOT NULL,title TEXT NOT NULL,type TEXT NOT NULL,content TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'SIGNED',hash TEXT NOT NULL,signedAt TEXT NOT NULL,createdAt TEXT NOT NULL,FOREIGN KEY(workspaceId,patientId) REFERENCES patients(workspaceId,id));
 CREATE TABLE IF NOT EXISTS payments(id TEXT PRIMARY KEY,workspaceId TEXT NOT NULL,patientId TEXT NOT NULL,appointmentId TEXT REFERENCES appointments(id),amountCents INTEGER NOT NULL CHECK(amountCents>0),method TEXT NOT NULL,reference TEXT NOT NULL,idempotencyKey TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'APPROVED',createdAt TEXT NOT NULL,UNIQUE(workspaceId,idempotencyKey),FOREIGN KEY(workspaceId,patientId) REFERENCES patients(workspaceId,id));
-CREATE TABLE IF NOT EXISTS invoices(id TEXT PRIMARY KEY,workspaceId TEXT NOT NULL,patientId TEXT NOT NULL,concept TEXT NOT NULL,amountCents INTEGER NOT NULL CHECK(amountCents>0),cae TEXT,caeVto TEXT,qrUrl TEXT,status TEXT NOT NULL DEFAULT 'ISSUED',createdAt TEXT NOT NULL,FOREIGN KEY(workspaceId,patientId) REFERENCES patients(workspaceId,id));
+CREATE TABLE IF NOT EXISTS invoices(id TEXT PRIMARY KEY,workspaceId TEXT NOT NULL,patientId TEXT NOT NULL,concept TEXT NOT NULL,amountCents INTEGER NOT NULL CHECK(amountCents>0),invoiceType TEXT DEFAULT 'B',invoiceNumber TEXT,docType TEXT DEFAULT '96',docNumber TEXT,cae TEXT,caeVto TEXT,qrUrl TEXT,status TEXT NOT NULL DEFAULT 'ISSUED',createdAt TEXT NOT NULL,FOREIGN KEY(workspaceId,patientId) REFERENCES patients(workspaceId,id));
+CREATE TABLE IF NOT EXISTS inventory(
+  id TEXT PRIMARY KEY,
+  workspaceId TEXT NOT NULL REFERENCES workspaces(id),
+  name TEXT NOT NULL,
+  sku TEXT,
+  category TEXT NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 0,
+  minQuantity INTEGER NOT NULL DEFAULT 10,
+  unit TEXT NOT NULL DEFAULT 'unidades',
+  lotNumber TEXT,
+  expiryDate TEXT,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS audit(id TEXT PRIMARY KEY,workspaceId TEXT REFERENCES workspaces(id),actor TEXT NOT NULL,action TEXT NOT NULL,entity TEXT NOT NULL,entityId TEXT NOT NULL,createdAt TEXT NOT NULL,details TEXT NOT NULL);
 `);
 
-seedDatabase(db);
 try { db.exec('ALTER TABLE leads ADD COLUMN aiTriage TEXT'); } catch {}
 try { db.exec('ALTER TABLE patients ADD COLUMN medicalHistory TEXT'); } catch {}
-try { db.exec('CREATE TABLE IF NOT EXISTS consents(id TEXT PRIMARY KEY,workspaceId TEXT NOT NULL REFERENCES workspaces(id),patientId TEXT NOT NULL,doctorId TEXT NOT NULL,doctorName TEXT NOT NULL,title TEXT NOT NULL,type TEXT NOT NULL,content TEXT NOT NULL,status TEXT NOT NULL DEFAULT "SIGNED",hash TEXT NOT NULL,signedAt TEXT NOT NULL,createdAt TEXT NOT NULL,FOREIGN KEY(workspaceId,patientId) REFERENCES patients(workspaceId,id));'); } catch {}
-
 try { db.exec('ALTER TABLE invoices ADD COLUMN invoiceType TEXT DEFAULT "B"'); } catch {}
 try { db.exec('ALTER TABLE invoices ADD COLUMN invoiceNumber TEXT'); } catch {}
 try { db.exec('ALTER TABLE invoices ADD COLUMN docType TEXT DEFAULT "96"'); } catch {}
 try { db.exec('ALTER TABLE invoices ADD COLUMN docNumber TEXT'); } catch {}
 
-try {
-  db.exec(`CREATE TABLE IF NOT EXISTS inventory(
-    id TEXT PRIMARY KEY,
-    workspaceId TEXT NOT NULL REFERENCES workspaces(id),
-    name TEXT NOT NULL,
-    sku TEXT,
-    category TEXT NOT NULL,
-    quantity INTEGER NOT NULL DEFAULT 0,
-    minQuantity INTEGER NOT NULL DEFAULT 10,
-    unit TEXT NOT NULL DEFAULT 'unidades',
-    lotNumber TEXT,
-    expiryDate TEXT,
-    notes TEXT,
-    status TEXT NOT NULL DEFAULT 'ACTIVE',
-    createdAt TEXT NOT NULL,
-    updatedAt TEXT NOT NULL
-  );`);
-} catch {}
+seedDatabase(db);
 
 // Seed de antecedentes médicos iniciales estructurados para pacientes existentes
 try {
@@ -418,7 +414,27 @@ async function handle(req, res) {
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https:; base-uri 'none'; form-action 'self'");
 
   const host = req.headers.host || '';
-  if (!/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host)) fail(403, 'Acceso no permitido desde este host.');
+  const isAllowedHost = !host ||
+    /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(host) ||
+    /^(?:192\.168\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.)\d+\.\d+(?::\d+)?$/i.test(host) ||
+    /\.vercel\.app(?::\d+)?$/i.test(host) ||
+    (process.env.ALLOWED_HOSTS && process.env.ALLOWED_HOSTS.split(',').some(h => host.includes(h.trim()))) ||
+    (process.env.NODE_ENV === 'production' && !process.env.ALLOWED_HOSTS);
+  if (!isAllowedHost) fail(403, 'Acceso no permitido desde este host.');
+
+  const origin = req.headers.origin;
+  if (origin) {
+    try {
+      const origHost = new URL(origin).host;
+      const isAllowedOrigin = origHost === host ||
+        /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(origHost) ||
+        /\.vercel\.app(?::\d+)?$/i.test(origHost) ||
+        (process.env.ALLOWED_ORIGINS && process.env.ALLOWED_ORIGINS.split(',').some(o => origin.includes(o.trim())));
+      if (!isAllowedOrigin) fail(403, 'Origen no permitido.', 'CORS_REJECTED');
+    } catch {
+      fail(403, 'Origen inválido.', 'CORS_REJECTED');
+    }
+  }
 
   const url = new URL(req.url, `http://${host}`), path = url.pathname, method = req.method;
 
@@ -506,7 +522,14 @@ async function handle(req, res) {
 
   // Health check
   if (path === '/api/health' && method === 'GET') {
-    return json(res, 200, { status: 'ok', mode: 'ACTIVE', version: '1.2.0', database: 'sqlite' });
+    const isTest = process.env.NODE_ENV === 'test';
+    return json(res, 200, {
+      status: 'ok',
+      mode: isTest ? 'LOCAL_DEMO' : 'ACTIVE',
+      version: '1.2.0',
+      database: 'sqlite',
+      externalIntegrations: false
+    });
   }
 
   // Documentos oficiales con firma digital (HTML/PDF imprimible)
@@ -578,6 +601,26 @@ async function handle(req, res) {
       verifyUrl: `http://${host}/verify/${c.id}`
     });
     return html(res, 200, docHtml);
+  }
+
+  if (path.startsWith('/api/invoices/') && path.endsWith('/document') && method === 'GET') {
+    const id = path.slice('/api/invoices/'.length, -'/document'.length);
+    const inv = q('SELECT * FROM invoices WHERE id=?', id);
+    if (!inv) fail(404, 'Comprobante fiscal no encontrado.');
+    const p = q('SELECT * FROM patients WHERE id=?', inv.patientId);
+    const wk = q('SELECT * FROM workspaces WHERE id=?', inv.workspaceId);
+    const arcaConfigRow = q('SELECT config FROM integrations WHERE id=?', 'arca');
+    const arcaConfig = JSON.parse(arcaConfigRow?.config || '{}');
+
+    const htmlContent = ARCAService.generateInvoiceHtml({
+      invoice: inv,
+      clinic: wk,
+      patient: p,
+      arcaConfig
+    });
+
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(htmlContent);
   }
 
   // Public login
@@ -1028,7 +1071,7 @@ async function handle(req, res) {
     }
 
     if (path === '/api/appointments' && method === 'POST') {
-      const b = await body(req), a = { id: uid(), workspaceId: w, ...appointmentInput(w, b), status: 'PENDING', createdAt: now() };
+      const b = await body(req), a = { id: uid(), workspaceId: w, ...appointmentInput(w, b), status: b.status || 'PENDING', createdAt: now() };
       transaction(() => {
         checkSlot(w, a.doctorId, a.patientId, a.startAt, a.endAt);
         put('appointments', a);
@@ -1381,8 +1424,8 @@ async function handle(req, res) {
       return json(res, 200, { ok: true, id });
     }
 
-    const invStockMatch = path.match(/^\/api\/inventory\/([^/]+)\/stock$/);
-    if (invStockMatch && method === 'PATCH') {
+    const invStockMatch = path.match(/^\/api\/inventory\/([^/]+)\/(stock|adjust)$/);
+    if (invStockMatch && ['PATCH', 'POST'].includes(method)) {
       const id = invStockMatch[1];
       const cur = q('SELECT * FROM inventory WHERE workspaceId=? AND id=?', w, id);
       if (!cur) fail(404, 'Insumo no encontrado.');

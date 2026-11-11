@@ -12,12 +12,18 @@ export class WhatsAppService {
    * Envía un mensaje de texto simple o interactivo a un paciente
    */
   static async sendMessage(config, { to, message }) {
-    if (!config || !config.phoneNumberId || !config.token) {
-      console.warn('[WhatsApp] Simulación de envío: credenciales no configuradas.');
-      return { simulated: true, to, message };
-    }
-
     const cleanPhone = String(to).replace(/[\s()-]/g, '').replace('+', '');
+    const waLink = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+
+    if (!config || !config.phoneNumberId || !config.token) {
+      return {
+        success: true,
+        cloudApi: false,
+        waLink,
+        message: 'Credenciales de Meta Cloud API no configuradas. Se generó enlace directo para envío inmediato vía WhatsApp.',
+        to: cleanPhone
+      };
+    }
     const url = `${this.getBaseUrl()}/${config.phoneNumberId}/messages`;
 
     try {

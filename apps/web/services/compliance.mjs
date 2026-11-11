@@ -51,7 +51,7 @@ export class ComplianceService {
     .seal-box { font-family: monospace; font-size: 9px; color: #436353; background: #fff; padding: 8px; border: 1px dashed #b9d4bd; border-radius: 6px; word-break: break-all; }
     .badge-signature { display: inline-flex; align-items: center; gap: 5px; background: #eaf4eb; color: #2a6840; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px; margin-bottom: 6px; }
     .qr-side { text-align: center; font-size: 10px; color: #5c796b; }
-    .qr-mock { width: 90px; height: 90px; border: 1px solid #b7d1bb; border-radius: 8px; margin: 0 auto 6px; display: grid; place-items: center; background: #fff; font-size: 9px; font-weight: bold; color: #245838; }
+    .qr-img { width: 90px; height: 90px; border: 1px solid #b7d1bb; border-radius: 8px; margin: 0 auto 6px; display: block; background: #fff; }
     .footer { margin-top: 40px; border-top: 1px solid #e1ebe2; padding-top: 15px; font-size: 11px; color: #768f82; display: flex; justify-content: space-between; }
     @media print { body { padding: 15px; } .no-print { display: none; } }
   </style>
@@ -88,7 +88,7 @@ export class ComplianceService {
       </div>
     </div>
     <div class="qr-side">
-      <div class="qr-mock">[QR VERIFICACIÓN]</div>
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(verifyUrl || ('https://abundance.clinic/verify/' + signatureDigest))}" alt="QR Verificación Oficial" class="qr-img">
       <span>Escanea para verificar autenticidad</span>
     </div>
   </div>

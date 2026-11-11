@@ -79,7 +79,7 @@ export class MercadoPagoService {
    */
   static async getPaymentStatus(config, paymentId) {
     if (!config || !config.accessToken) {
-      return { status: 'approved', simulated: true };
+      return { status: 'pending', error: 'Mercado Pago no configurado con Access Token en Integraciones.' };
     }
 
     const url = `${this.getBaseUrl()}/v1/payments/${paymentId}`;

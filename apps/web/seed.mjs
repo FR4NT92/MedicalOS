@@ -98,7 +98,9 @@ export function seedDatabase(db) {
     for (const [id,workspaceId,role,email,name,password] of [
       ['user-admin','clinic-central','CLINIC_ADMIN','admin@clinica.com','Dra. Julia Morales','admin123'],
       ['user-nordelta','clinic-nordelta','CLINIC_ADMIN','admin@nordelta.com','Dr. Andrés Valenzuela','admin123'],
-      ['user-super',null,'SUPER_ADMIN','superadmin@clinica.com','Super Administrador','admin123']
+      ['user-other','clinic-nordelta','CLINIC_ADMIN','otra@clinica.test','Dra. Mariana Costa','demo-otra-2026'],
+      ['user-super',null,'SUPER_ADMIN','superadmin@clinica.com','Super Administrador','admin123'],
+      ['user-super-test',null,'SUPER_ADMIN','superadmin@clinica.test','Super Administrador QA','demo-admin-2026']
     ]) {
       const salt=randomBytes(16).toString('hex');
       put('users',{id,workspaceId,role,email,name,salt,passwordHash:scryptSync(password,salt,64).toString('hex')});
@@ -160,6 +162,23 @@ export function seedDatabase(db) {
       appointmentId:null,amountCents:amount*100,method:'TRANSFERENCIA',reference:`TRF-${38900+i}`,
       idempotencyKey:`seed-${i}`,createdAt:now
     }));
+
+    // Insumos Clínicos de Inventario
+    const defaultInventory = [
+      ['inv-1', 'Guantes de nitrilo sin polvo talle M (Caja x 100)', 'GUA-NIT-M', 'Descartables', 35, 10, 'cajas', 'LT-48201', '2028-05-30', 'Para examen clínico y extracciones'],
+      ['inv-2', 'Jeringas descartables 5ml con aguja 21G (Caja x 100)', 'JER-5ML-21G', 'Descartables', 18, 8, 'cajas', 'LT-99120', '2027-11-15', 'Inyectables y toma de muestras'],
+      ['inv-3', 'Gasas estériles hidrófilas 10x10cm (Sobre x 10)', 'GAS-EST-10', 'Curaciones', 50, 15, 'sobres', 'LT-10294', '2029-01-20', 'Curaciones y antisepsia'],
+      ['inv-4', 'Solución Fisiológica 0.9% 500ml', 'SUER-FIS-500', 'Soluciones y Sueros', 28, 10, 'frascos', 'LT-77123', '2027-08-10', 'Infusiones y lavado de heridas'],
+      ['inv-5', 'Alcohol Etílico 70% 1 Litro', 'ALC-70-1L', 'Antisépticos', 14, 5, 'botellas', 'LT-88122', '2028-03-15', 'Desinfección de consultorios'],
+      ['inv-6', 'Lidocaína 2% c/epinefrina ampolla 5ml (Caja x 10)', 'LID-EPI-2', 'Medicamentos', 12, 5, 'cajas', 'LT-11029', '2026-12-10', 'Anestésico local para procedimientos'],
+      ['inv-7', 'Barbijos quirúrgicos tricapa termosellados (Caja x 50)', 'BAR-TRI-50', 'Descartables', 22, 10, 'cajas', 'LT-55419', '2028-06-30', 'Protección personal equipo de salud']
+    ];
+
+    defaultInventory.forEach(([id, name, sku, category, quantity, minQuantity, unit, lotNumber, expiryDate, notes]) => {
+      put('inventory', {
+        id, workspaceId: 'clinic-central', name, sku, category, quantity, minQuantity, unit, lotNumber, expiryDate, notes, status: 'ACTIVE', createdAt: now, updatedAt: now
+      });
+    });
 
     // Audit
     put('audit',{
