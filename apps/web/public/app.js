@@ -1842,6 +1842,8 @@ function recordCard(r) {
           ${v.bmi ? `<div class="vitals-box"><span class="v-label">IMC</span><span class="v-val">${esc(v.bmi)}</span></div>` : ''}
         </div>
         ${v.notes ? `<p style="margin-top:10px">${esc(v.notes)}</p>` : ''}
+      ` : content.html ? `
+        <div class="clinical-html-content" style="line-height:1.6">${content.html}</div>
       ` : hasSoap ? `
         <div class="soap-grid" style="margin-bottom:12px">
           ${[['subjective', 'S · Subjetivo'], ['objective', 'O · Objetivo'], ['assessment', 'A · Evaluación'], ['plan', 'P · Plan']].filter(([k]) => content[k]).map(([k, label]) => `
@@ -1851,6 +1853,21 @@ function recordCard(r) {
       ` : `
         <div style="white-space:pre-wrap;line-height:1.6">${esc(typeof content === 'string' ? content : (content.text || content.notes || JSON.stringify(content)))}</div>
       `}
+
+      ${content.consumedSupplies && content.consumedSupplies.length ? `
+        <div style="margin-top:12px;padding:8px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px">
+          <strong style="font-size:11px;color:#166534;display:flex;align-items:center;gap:6px">
+            ${icon('box', 13)} Insumos descontados automáticamente del stock clínico:
+          </strong>
+          <div class="flex" style="flex-wrap:wrap;gap:6px;margin-top:5px">
+            ${content.consumedSupplies.map(cs => `
+              <span class="attachment-chip" style="background:#fff;border-color:#86efac;color:#14532d;cursor:default;margin:0">
+                <b>${esc(cs.name)}</b> x ${cs.quantity} ${esc(cs.unit || 'uds')}
+              </span>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
 
       ${attachments.length ? `
         <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #e2e8f0">
@@ -2917,34 +2934,354 @@ function patientDetail(id) {
 function recordForm(amendmentId = null) {
   const old = amendmentId ? S.data.records.find(r => r.id === amendmentId) : null;
   const pid = old?.patientId || S.selectedPatient;
-  formDialog('record', old ? 'Agregar Enmienda Médica' : 'Nueva Evolución Clínica (SOAP)', 'Registro clínico con firma e integridad SHA-256.',
+  const p = patientBy(pid);
+  const inventory = S.data.inventory || [];
+  const oldContent = old ? (typeof old.content === 'object' ? old.content : {}) : {};
+
+  formDialog('record', old ? 'Agregar Enmienda Médica' : 'Evolución Clínica y Registro de Tratamiento', 'Carga de sesión, editor con tablas HRV y descuento automático de inventario.',
+    `<div class="omni-template-strip">
+      <span style="font-size:11px;font-weight:700;color:#475569;display:flex;align-items:center;margin-right:4px">Plantillas de Sesión:</span>
+      <button type="button" class="omni-template-btn" data-template="chamber">🫧 Cámara Hiperbárica (CHB)</button>
+      <button type="button" class="omni-template-btn" data-template="iv">💧 Sueroterapia</button>
+      <button type="button" class="omni-template-btn" data-template="light">🔴 Fotobiomodulación (Luz)</button>
+      <button type="button" class="omni-template-btn" data-template="soap">📝 SOAP Clásico</button>
+    </div>` +
     patientSelect(pid) +
-    field('Diagnóstico / Problema Principal', 'problem', 'text', '', 'placeholder="Ej: Enfermedad celíaca del adulto, Hiperestrogenismo, Control postoperatorio..."') +
-    selectField('Especialidad Médica', 'specialty', [
+    field('Tratamiento / Diagnóstico / Problema *', 'problem', 'text', oldContent.problem || '', 'required placeholder="Ej: Camara hiperbarica, Sueroterapia, Fotobiomodulación..."', true) +
+    selectField('Especialidad / Área', 'specialty', [
       ['Medicina Integrativa', 'Medicina Integrativa'],
+      ['Enfermería y Procedimientos', 'Enfermería y Procedimientos'],
+      ['Medicina Hiperbárica', 'Medicina Hiperbárica'],
       ['Medicina General y Preventiva', 'Medicina General y Preventiva'],
-      ['Cirugía Plástica y Reparadora', 'Cirugía Plástica y Reparadora'],
       ['Dermatología y Estética', 'Dermatología y Estética'],
-      ['Ginecología y Obstetricia', 'Ginecología y Obstetricia'],
-      ['Kinesiología y Fisioterapia', 'Kinesiología y Fisioterapia'],
-      ['Nutrición Clínica', 'Nutrición Clínica']
-    ], 'Medicina Integrativa') +
-    area('S · Subjetivo (Motivo de consulta, síntomas)', 'subjective', '', 'required maxlength="8000"', false) +
-    area('O · Objetivo (Examen físico, signos vitales)', 'objective', '', 'maxlength="8000"', false) +
-    area('A · Evaluación (Diagnóstico presuntivo/certeza)', 'assessment', '', 'maxlength="8000"', false) +
-    area('P · Plan (Indicaciones terapéuticas, estudios)', 'plan', '', 'required maxlength="8000"', false) +
+      ['Cirugía Plástica y Reparadora', 'Cirugía Plástica y Reparadora'],
+      ['Kinesiología y Fisioterapia', 'Kinesiología y Fisioterapia']
+    ], oldContent.specialty || 'Medicina Integrativa', true) +
     `<div class="form-field full">
+      <div class="between" style="margin-bottom:4px">
+        <label style="margin:0">Evolución Clínica y Registro de Sesión (Editor de Tablas y Texto) *</label>
+        <span class="tiny muted">Edita texto y tablas directamente</span>
+      </div>
+      <div class="omni-editor-toolbar">
+        <button type="button" class="omni-editor-btn highlight" id="btn-insert-hrv-table">${icon('activity', 13)} Insertar Tabla HRV</button>
+        <button type="button" class="omni-editor-btn" id="btn-insert-table">${icon('plus', 12)} Tabla 3x3</button>
+        <button type="button" class="omni-editor-btn" id="btn-add-table-row">➕ Fila a Tabla</button>
+        <span style="border-left:1px solid #cbd5e1;height:18px;margin:0 4px"></span>
+        <button type="button" class="omni-editor-btn" data-command="bold" title="Negrita"><b>B</b></button>
+        <button type="button" class="omni-editor-btn" data-command="italic" title="Cursiva"><i>I</i></button>
+        <button type="button" class="omni-editor-btn" data-command="insertUnorderedList" title="Lista con viñetas">• Lista</button>
+      </div>
+      <div id="omni-rich-editor" class="omni-editor-content" contenteditable="true">${oldContent.html || (oldContent.subjective ? `<p><b>S:</b> ${esc(oldContent.subjective)}</p><p><b>O:</b> ${esc(oldContent.objective || '')}</p><p><b>A:</b> ${esc(oldContent.assessment || '')}</p><p><b>P:</b> ${esc(oldContent.plan || '')}</p>` : '<p>Comienza a registrar la evolución médica o selecciona una plantilla arriba...</p>')}</div>
+      <input type="hidden" name="html" id="omni-record-html">
+    </div>
+
+    <!-- Sección de Insumos Consumidos con Descuento Inmediato de Stock -->
+    <div class="form-field full omni-supply-picker">
+      <div class="between" style="margin-bottom:8px">
+        <div>
+          <strong style="font-size:12px;color:#1e4c3a;display:flex;align-items:center;gap:6px">
+            ${icon('box', 15)} Insumos utilizados en esta atención (Descontar automáticamente del stock)
+          </strong>
+          <span class="tiny muted" style="display:block">Al guardar la evolución, las unidades se restarán en tiempo real del inventario con auditoría.</span>
+        </div>
+        <button type="button" class="btn small" id="add-evolution-supply-btn">${icon('plus', 12)} Agregar Insumo</button>
+      </div>
+      <div id="evolution-supplies-container" style="display:flex;flex-direction:column;gap:8px"></div>
+      <input type="hidden" name="consumedSuppliesJson" id="evolution-supplies-json" value="[]">
+    </div>
+
+    <div class="form-field full">
       <label>Adjuntar Estudio / Documento (Opcional - PDF, JPG, PNG)</label>
       <input type="file" id="record-file-picker" accept=".pdf,.png,.jpg,.jpeg">
       <div id="record-file-info" class="tiny muted" style="margin-top:4px">Máximo 15 MB. Se alojará adjunto a esta evolución.</div>
       <input type="hidden" name="attachmentPayload" id="record-attachment-payload">
     </div>`,
-    old ? 'Guardar enmienda' : 'Firmar y guardar evolución',
+    old ? 'Guardar enmienda' : 'Firmar y guardar evolución (Descontar stock)',
     old ? `data-amendment="${old.id}"` : '', 'wide'
   );
   if (old) $('#field-patientId').disabled = true;
 
   setTimeout(() => {
+    const editor = $('#omni-rich-editor');
+    const problemInput = $('#field-problem');
+    const specialtyInput = $('#field-specialty');
+    const suppliesContainer = $('#evolution-supplies-container');
+    const suppliesJsonInput = $('#evolution-supplies-json');
+
+    // Supply items management
+    const updateSuppliesJson = () => {
+      const rows = Array.from(suppliesContainer?.querySelectorAll('.evolution-supply-row') || []);
+      const items = rows.map(r => {
+        const sel = r.querySelector('.supply-select');
+        const opt = sel?.options[sel.selectedIndex];
+        return {
+          inventoryId: sel?.value || '',
+          name: opt?.dataset.name || '',
+          quantity: parseInt(r.querySelector('.supply-qty')?.value, 10) || 1,
+          unit: opt?.dataset.unit || 'uds'
+        };
+      }).filter(x => x.inventoryId);
+      if (suppliesJsonInput) suppliesJsonInput.value = JSON.stringify(items);
+    };
+
+    const addSupplyRow = (presetId = null, presetQty = 1) => {
+      if (!suppliesContainer) return;
+      const row = document.createElement('div');
+      row.className = 'evolution-supply-row flex';
+      row.style.gap = '8px';
+      row.style.alignItems = 'center';
+      row.innerHTML = `
+        <select class="input supply-select grow" style="font-size:12px">
+          <option value="">-- Seleccionar insumo consumido del inventario --</option>
+          ${inventory.map(i => `<option value="${i.id}" ${presetId === i.id ? 'selected' : ''} data-name="${esc(i.name)}" data-unit="${esc(i.unit)}">${esc(i.name)} (Stock actual: ${i.quantity} ${esc(i.unit)})</option>`).join('')}
+        </select>
+        <input type="number" class="input supply-qty" value="${presetQty}" min="1" max="999" style="width:75px;text-align:center" title="Cantidad consumida">
+        <button type="button" class="icon-btn remove-supply-item" style="color:#e53e3e">${icon('close', 14)}</button>
+      `;
+      suppliesContainer.appendChild(row);
+      updateSuppliesJson();
+    };
+
+    $('#add-evolution-supply-btn')?.addEventListener('click', () => addSupplyRow());
+    suppliesContainer?.addEventListener('input', updateSuppliesJson);
+    suppliesContainer?.addEventListener('change', updateSuppliesJson);
+    suppliesContainer?.addEventListener('click', e => {
+      if (e.target.closest('.remove-supply-item')) {
+        e.target.closest('.evolution-supply-row')?.remove();
+        updateSuppliesJson();
+      }
+    });
+
+    // Formatting Toolbar commands
+    document.querySelectorAll('.omni-editor-btn[data-command]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.execCommand(btn.dataset.command, false, null);
+        editor?.focus();
+      });
+    });
+
+    // Insert Table 3x3
+    $('#btn-insert-table')?.addEventListener('click', () => {
+      const tableHtml = `
+        <table class="clinical-table">
+          <thead>
+            <tr><th>Parámetro</th><th>Valor Medido</th><th>Observación</th></tr>
+          </thead>
+          <tbody>
+            <tr><td contenteditable="true">Dato 1</td><td contenteditable="true">—</td><td contenteditable="true">Normal</td></tr>
+            <tr><td contenteditable="true">Dato 2</td><td contenteditable="true">—</td><td contenteditable="true">Normal</td></tr>
+          </tbody>
+        </table><p></p>
+      `;
+      document.execCommand('insertHTML', false, tableHtml);
+      editor?.focus();
+    });
+
+    // Insert HRV Table
+    $('#btn-insert-hrv-table')?.addEventListener('click', () => {
+      const hrvTableHtml = `
+        <p><b>Variabilidad de la Frecuencia Cardíaca (HRV):</b></p>
+        <table class="clinical-table">
+          <thead>
+            <tr>
+              <th>Hora</th>
+              <th>HR (FC)</th>
+              <th>HRV</th>
+              <th>RMSSD</th>
+              <th>SDNN</th>
+              <th>PNN50</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td contenteditable="true">14:17</td>
+              <td contenteditable="true">70</td>
+              <td contenteditable="true">40</td>
+              <td contenteditable="true">13.04</td>
+              <td contenteditable="true">30.46</td>
+              <td contenteditable="true">0</td>
+            </tr>
+            <tr>
+              <td contenteditable="true">14:49</td>
+              <td contenteditable="true">95</td>
+              <td contenteditable="true">11</td>
+              <td contenteditable="true">2.00</td>
+              <td contenteditable="true">6.87</td>
+              <td contenteditable="true">0</td>
+            </tr>
+          </tbody>
+        </table><p></p>
+      `;
+      document.execCommand('insertHTML', false, hrvTableHtml);
+      editor?.focus();
+    });
+
+    // Add Row to Table
+    $('#btn-add-table-row')?.addEventListener('click', () => {
+      const tables = editor?.querySelectorAll('table');
+      if (tables && tables.length) {
+        const lastTable = tables[tables.length - 1];
+        const tbody = lastTable.querySelector('tbody') || lastTable;
+        const colCount = lastTable.querySelectorAll('tr')[0]?.children.length || 3;
+        const tr = document.createElement('tr');
+        for (let i = 0; i < colCount; i++) {
+          const td = document.createElement('td');
+          td.contentEditable = 'true';
+          td.textContent = '—';
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      } else {
+        toast('Inserta una tabla primero para agregar filas.', true);
+      }
+    });
+
+    // Template click handlers
+    document.querySelectorAll('.omni-template-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const t = btn.dataset.template;
+        if (t === 'chamber') {
+          if (problemInput) problemInput.value = 'Camara hiperbarica';
+          if (specialtyInput) specialtyInput.value = 'Medicina Hiperbárica';
+          if (editor) {
+            editor.innerHTML = `
+              <p><b>CH # 22</b><br>
+              TA: 100/60 mmHg<br>
+              FC: 86 lpm<br>
+              SO2: 99%</p>
+
+              <p>Tiempo de Presurización: 6 minutos<br>
+              Tiempo de Despresurización: 5 minutos<br>
+              Tiempo total de permanencia en CHB: 60 minutos</p>
+
+              <p><b>Buena tolerancia al tratamiento</b><br>
+              <b>CHB (supino) - Variabilidad de la Frecuencia Cardíaca:</b></p>
+              <table class="clinical-table">
+                <thead>
+                  <tr>
+                    <th>Hora</th>
+                    <th>HR (FC)</th>
+                    <th>HRV</th>
+                    <th>RMSSD</th>
+                    <th>SDNN</th>
+                    <th>PNN50</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td contenteditable="true">14:17</td>
+                    <td contenteditable="true">70</td>
+                    <td contenteditable="true">40</td>
+                    <td contenteditable="true">13.04</td>
+                    <td contenteditable="true">30.46</td>
+                    <td contenteditable="true">0</td>
+                  </tr>
+                  <tr>
+                    <td contenteditable="true">14:49</td>
+                    <td contenteditable="true">95</td>
+                    <td contenteditable="true">11</td>
+                    <td contenteditable="true">2.00</td>
+                    <td contenteditable="true">6.87</td>
+                    <td contenteditable="true">0</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>Observaciones de sesión: Sin eventos adversos durante la despresurización.</p>
+            `;
+          }
+          if (suppliesContainer) {
+            suppliesContainer.innerHTML = '';
+            const maskItem = inventory.find(i => /barbijo|mascara|mascarilla|oxigeno/i.test(i.name)) || inventory[0];
+            if (maskItem) addSupplyRow(maskItem.id, 1);
+          }
+        } else if (t === 'iv') {
+          if (problemInput) problemInput.value = 'Sueroterapia';
+          if (specialtyInput) specialtyInput.value = 'Medicina Integrativa';
+          if (editor) {
+            editor.innerHTML = `
+              <p><b>Protocolo de Sueroterapia Endovenosa</b><br>
+              Solución: Solución Fisiológica 0.9% 500 ml<br>
+              Activos / Fármacos: Vitamina C 15g + Cloruro de Magnesio 1.5g + Complejo B<br>
+              Vía de acceso: Catéter 20G en MSI (Pliegue de codo)<br>
+              Velocidad de goteo: 45 gotas / min (Tiempo total: 45 minutos)</p>
+
+              <p><b>Control de Signos Vitales:</b></p>
+              <table class="clinical-table">
+                <thead>
+                  <tr>
+                    <th>Momento</th>
+                    <th>Tensión Arterial</th>
+                    <th>Frecuencia Cardíaca</th>
+                    <th>SatO2</th>
+                    <th>Tolerancia</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td contenteditable="true">Pre infusión</td>
+                    <td contenteditable="true">120/80 mmHg</td>
+                    <td contenteditable="true">74 lpm</td>
+                    <td contenteditable="true">98%</td>
+                    <td contenteditable="true">Normal</td>
+                  </tr>
+                  <tr>
+                    <td contenteditable="true">Post infusión</td>
+                    <td contenteditable="true">115/75 mmHg</td>
+                    <td contenteditable="true">70 lpm</td>
+                    <td contenteditable="true">99%</td>
+                    <td contenteditable="true">Excelente / Sin flebitis</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>Retiro de vía sin hematoma, paciente compensado hemodinámicamente.</p>
+            `;
+          }
+          if (suppliesContainer) {
+            suppliesContainer.innerHTML = '';
+            const suero = inventory.find(i => /suero|soluci[oó]n|fisiol/i.test(i.name));
+            const cat = inventory.find(i => /cat[eé]ter|tefl[oó]n|aguja|perif/i.test(i.name));
+            const guia = inventory.find(i => /gu[ií]a|perf[uú]s|macrogot/i.test(i.name));
+            if (suero) addSupplyRow(suero.id, 1);
+            if (cat) addSupplyRow(cat.id, 1);
+            if (guia) addSupplyRow(guia.id, 1);
+            if (!suero && !cat && !guia && inventory.length) addSupplyRow(inventory[0].id, 1);
+          }
+        } else if (t === 'light') {
+          if (problemInput) problemInput.value = 'Fotobiomodulación';
+          if (specialtyInput) specialtyInput.value = 'Medicina Integrativa';
+          if (editor) {
+            editor.innerHTML = `
+              <p><b>Sesión de Fotobiomodulación (Terapia de Luz)</b><br>
+              Longitud de onda: 660 nm (Luz Roja) + 850 nm (Infrarroja cercana)<br>
+              Zona de aplicación: Cuerpo entero (Cabina de Fotobiomodulación)<br>
+              Tiempo de exposición: 20 minutos<br>
+              Dosis / Irradiancia: 100 mW/cm²</p>
+
+              <p><b>Respuesta del Paciente:</b><br>
+              Tolerancia dérmica óptima. Reporta sensación de bienestar, relajación y disminución de rigidez muscular post sesión.</p>
+            `;
+          }
+          if (suppliesContainer) {
+            suppliesContainer.innerHTML = '';
+            const desc = inventory.find(i => /camilla|barbijo|descartable/i.test(i.name));
+            if (desc) addSupplyRow(desc.id, 1);
+          }
+        } else if (t === 'soap') {
+          if (problemInput) problemInput.value = 'Consulta Médica General';
+          if (specialtyInput) specialtyInput.value = 'Medicina General y Preventiva';
+          if (editor) {
+            editor.innerHTML = `
+              <p><b>S · Subjetivo:</b> Motivo de consulta y síntomas referidos por el paciente.</p>
+              <p><b>O · Objetivo:</b> Examen físico, signos vitales y hallazgos clínicos.</p>
+              <p><b>A · Evaluación:</b> Diagnóstico presuntivo o de certeza.</p>
+              <p><b>P · Plan:</b> Conducta médica, indicaciones terapéuticas y solicitud de estudios.</p>
+            `;
+          }
+        }
+      });
+    });
+
+    // File picker
     $('#record-file-picker')?.addEventListener('change', e => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -4096,13 +4433,23 @@ document.addEventListener('submit', async e => {
           b.patientId = S.data.records.find(r => r.id === b.amendmentOf).patientId;
         }
         let fileData = [];
-        try { fileData = JSON.parse(b.attachmentsJson || '[]'); } catch {}
+        try { fileData = JSON.parse(b.attachmentPayload || b.attachmentsJson || '[]'); } catch {}
         b.attachments = fileData;
+
+        let supplies = [];
+        try { supplies = JSON.parse(b.consumedSuppliesJson || '[]'); } catch {}
+        b.consumedSupplies = supplies;
+
+        const editor = document.getElementById('omni-rich-editor');
+        if (editor) {
+          b.html = editor.innerHTML;
+        }
+
         await api('/api/records', 'POST', b);
         S.selectedPatient = b.patientId;
         S.view = 'records';
         S.omniTab = 'evoluciones';
-        message = 'Evolución médica firmada y registrada con integridad criptográfica.';
+        message = 'Evolución médica firmada y registrada.' + (supplies.length ? ` Se descontaron ${supplies.length} insumos del inventario.` : '');
         break;
       }
       case 'prescription':

@@ -1589,24 +1589,42 @@ async function handle(req, res) {
 
     if (path === '/api/records' && method === 'POST') {
       const b = await body(req);
-      patient(w, text(b.patientId, 'Paciente', 1, 100));
+      const pat = patient(w, text(b.patientId, 'Paciente', 1, 100));
       const amendmentOf = b.amendmentOf ? text(b.amendmentOf, 'Registro original', 1, 100) : null;
       if (amendmentOf && !q('SELECT id FROM records WHERE id=? AND workspaceId=? AND patientId=?', amendmentOf, w, b.patientId)) {
         fail(404, 'Registro original no encontrado.');
       }
       const recordType = b.type || (amendmentOf ? 'AMENDMENT' : 'SOAP_NOTE');
+      const consumedSupplies = Array.isArray(b.consumedSupplies) ? b.consumedSupplies : [];
       const content = {
-        subjective: optional(b.subjective, 'Subjetivo', 8000) || '',
-        objective: optional(b.objective, 'Objetivo', 8000) || '',
-        assessment: optional(b.assessment, 'Evaluación', 8000) || '',
-        plan: optional(b.plan, 'Plan', 8000) || '',
+        subjective: optional(b.subjective, 'Subjetivo', 15000) || '',
+        objective: optional(b.objective, 'Objetivo', 15000) || '',
+        assessment: optional(b.assessment, 'Evaluación', 15000) || '',
+        plan: optional(b.plan, 'Plan', 15000) || '',
+        html: optional(b.html, 'Contenido Clínico', 35000) || '',
         problem: optional(b.problem, 'Problema / Diagnóstico', 500) || '',
-        specialty: optional(b.specialty, 'Especialidad', 200) || 'Medicina General',
+        specialty: optional(b.specialty, 'Especialidad', 200) || 'Medicina Integrativa',
         title: optional(b.title, 'Título', 200) || '',
+        sessionType: optional(b.sessionType, 'Tipo de Sesión', 50) || '',
         vitals: b.vitals || null,
+        consumedSupplies,
         attachments: Array.isArray(b.attachments) ? b.attachments : []
       };
       const r = transaction(() => {
+        // Descuento automático de stock de insumos utilizados en la atención médica
+        for (const sup of consumedSupplies) {
+          if (sup.inventoryId) {
+            const inv = q('SELECT * FROM inventory WHERE workspaceId=? AND id=?', w, sup.inventoryId);
+            if (inv) {
+              const qtyToDiscount = Math.max(1, parseInt(sup.quantity, 10) || 1);
+              const newQty = Math.max(0, inv.quantity - qtyToDiscount);
+              run('UPDATE inventory SET quantity=?, updatedAt=? WHERE workspaceId=? AND id=?', newQty, now(), w, inv.id);
+              audit(u, 'INVENTORY_DISCOUNT_EVOLUTION', 'inventory', inv.id,
+                `Descuento automático de ${qtyToDiscount} ${inv.unit} de "${inv.name}" por evolución médica del paciente ${pat.firstName} ${pat.lastName} (Tratamiento: ${content.problem || 'Atención'}). Stock restante: ${newQty}.`);
+            }
+          }
+        }
+
         const previous = q('SELECT hash FROM records WHERE workspaceId=? AND patientId=? ORDER BY rowid DESC LIMIT 1', w, b.patientId);
         const r = {
           id: uid(), workspaceId: w, patientId: b.patientId,
@@ -1617,7 +1635,7 @@ async function handle(req, res) {
         };
         r.hash = recordHash(r);
         put('records', r);
-        audit(u, 'RECORD_APPENDED', 'record', r.id, `Registro clínico (${recordType}) registrado por ${u.name}.`);
+        audit(u, 'RECORD_APPENDED', 'record', r.id, `Registro clínico (${recordType} - ${content.problem || 'Evolución'}) firmado por ${u.name}.${consumedSupplies.length ? ` Se descontaron ${consumedSupplies.length} insumo(s) del stock.` : ''}`);
         return r;
       });
       return json(res, 201, { ...r, content, legalSignature: true });
