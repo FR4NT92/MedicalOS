@@ -525,8 +525,12 @@ function derived() {
   };
 }
 
+function brandLogoSvg(size = 18, fill = 'currentColor') {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 340 439" fill="${fill}" aria-hidden="true" style="display:block;flex-shrink:0;"><path d="M170 0 L340 292 L255 292 L170 146 L85 292 L0 292 Z"/><path d="M85 292 L170 292 L213 365 L171 438 Z"/></svg>`;
+}
+
 function brand() {
-  return `<div class="brand"><div class="brandmark">+</div><div class="brand-text"><div class="brand-name">abundance<span style="color:#a8c08d">.</span></div><div class="brand-sub">Clinic OS</div></div></div>`;
+  return `<div class="brand"><div class="brandmark">${brandLogoSvg(18)}</div><div class="brand-text"><div class="brand-name">abundance<span style="color:#a8c08d">.</span></div><div class="brand-sub">Clinic OS</div></div></div>`;
 }
 
 function loginPage(error = '') {
@@ -2489,7 +2493,7 @@ function renderSetPasswordView(accessToken, tokenType, refreshToken = null) {
   <div class="login-shell" style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d241e;padding:20px;font-family:system-ui,-apple-system,sans-serif;">
     <div class="panel" style="max-width:440px;width:100%;padding:32px;background:#ffffff;border-radius:12px;box-shadow:0 20px 40px rgba(0,0,0,0.3);">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;">
-        <div class="brandmark" style="background:#15372f;color:#ffffff;width:38px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;">+</div>
+        <div class="brandmark" style="background:#15372f;color:#ffffff;width:38px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;">${brandLogoSvg(20, '#ffffff')}</div>
         <div>
           <div style="font-weight:700;font-size:16px;color:#15372f;">Medical OS</div>
           <div style="font-size:12px;color:#62726b;">Plataforma Integral de Salud</div>

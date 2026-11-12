@@ -1535,7 +1535,9 @@ async function handle(req, res) {
   const files = {
     '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
     '/styles.css': ['styles.css', 'text/css; charset=utf-8'],
-    '/favicon.svg': ['favicon.svg', 'image/svg+xml']
+    '/favicon.svg': ['favicon.svg', 'image/svg+xml'],
+    '/favicon.png': ['favicon.png', 'image/png'],
+    '/logo.png': ['logo.png', 'image/png']
   };
 
   const entry = files[path] || (
