@@ -52,3 +52,44 @@
 /* --- INVENTARIO DE INSUMOS & FACTURACIÓN ARCA --- */
 .table-wrap td .btn.small{padding:4px 9px;min-height:28px;font-size:11px}
 .table-wrap td .icon-btn{width:28px;height:28px}
+
+/* --- AGENDA DESGLOSADA POR TRATAMIENTO & EQUIPO PROFESIONAL --- */
+.category-filter-strip{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 16px}
+.category-pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:6px 12px;border-radius:20px;border:1px solid #dce5d6;background:#ffffff;color:#5a6f5e;cursor:pointer;transition:all .15s ease}
+.category-pill:hover{background:#f3f7f0;border-color:#b9cfb2;color:#1e3828}
+.category-pill .pill-count{font-size:10px;padding:2px 6px;border-radius:10px;background:#eef4ea;color:#456b4f}
+.category-pill.active{background:#15372f;color:#ffffff;border-color:#15372f}
+.category-pill.active .pill-count{background:#ffffff26;color:#ffffff}
+.category-pill.red.active{background:#b5382a;border-color:#b5382a}
+.category-pill.blue.active{background:#285e94;border-color:#285e94}
+.category-pill.amber.active{background:#9e7019;border-color:#9e7019}
+.category-pill.green.active{background:#2a6845;border-color:#2a6845}
+
+.treatment-section{margin-bottom:18px;border:1px solid #e1e9dc;border-radius:12px;background:#ffffff;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.02)}
+.treatment-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 18px;background:#fafcf8;border-bottom:1px solid #edf2e8}
+.treatment-header.surgery{background:#fef5f4;border-bottom-color:#f8d8d3}
+.treatment-header.procedure{background:#f3f7fd;border-bottom-color:#dce7fa}
+.treatment-header.consultation{background:#f3f8f4;border-bottom-color:#daf0dc}
+.treatment-header.follow_up{background:#fdf9ef;border-bottom-color:#f6eed4}
+.treatment-header h3{font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px}
+.treatment-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;padding:14px 18px}
+.treatment-card{border:1px solid #e4ece0;border-radius:10px;padding:13px 15px;background:#ffffff;display:flex;flex-direction:column;gap:9px;transition:transform .15s ease,box-shadow .15s ease}
+.treatment-card:hover{transform:translateY(-2px);box-shadow:0 6px 14px rgba(21,55,47,0.07);border-color:#c8dac1}
+.treatment-card-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.treatment-card-time{font-size:12px;font-weight:700;color:#18362b;display:flex;align-items:center;gap:6px}
+.treatment-card-patient{font-size:13px;font-weight:650;color:#14342a;margin-bottom:2px}
+.treatment-card-doctor{display:flex;align-items:center;gap:8px;font-size:11px;color:#45604e;background:#f6f9f3;padding:6px 10px;border-radius:6px;border:1px solid #edf2e7}
+.treatment-card-notes{font-size:11px;color:#5a6e60;line-height:1.45;background:#fbfdf9;border-left:3px solid #8ba679;padding:6px 10px;border-radius:0 6px 6px 0}
+.treatment-card-actions{display:flex;align-items:center;gap:6px;margin-top:4px}
+.empty-treatment-category{padding:18px;text-align:center;color:#8fa08c;font-size:11px;display:flex;align-items:center;justify-content:center;gap:7px}
+
+.doctor-card-interactive{display:flex;align-items:center;gap:11px;padding:11px 12px;border-radius:10px;border:1px solid #edf2e8;background:#ffffff;cursor:pointer;transition:all .15s ease;margin-bottom:8px}
+.doctor-card-interactive:hover{background:#f3f8f0;border-color:#b9cfb0;transform:translateX(2px)}
+.doctor-card-interactive.selected{background:#edf7eb;border-color:#5a926b;box-shadow:0 0 0 2px #5a926b33}
+.doctor-card-badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:5px;background:#e5f0df;color:#2f5d3d;margin-top:3px;display:inline-block}
+.doctor-filter-banner{background:#eaf4ea;border:1px solid #c9e2c7;padding:8px 12px;border-radius:8px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#245838}
+
+/* --- GESTIÓN DE PERSONAL & CONTROL DE ACCESOS --- */
+.staff-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:22px}
+@media(max-width:960px){.staff-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.staff-stats{grid-template-columns:1fr}}

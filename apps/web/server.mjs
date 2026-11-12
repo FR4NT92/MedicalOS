@@ -889,6 +889,10 @@ async function handle(req, res) {
           medicalHistory: p.medicalHistory ? (typeof p.medicalHistory === 'string' ? JSON.parse(p.medicalHistory) : p.medicalHistory) : null
         })),
         doctors: rows('doctors'),
+        staff: all('SELECT id, workspaceId, role, email, name FROM users WHERE workspaceId=?', w).map(su => ({
+          ...su,
+          specialty: (all('SELECT id, specialty FROM doctors WHERE workspaceId=?', w).find(d => d.id === su.id)?.specialty) || (su.role === 'RECEPTIONIST' ? 'Recepción y Turnos' : (su.role === 'DOCTOR' ? 'Medicina General' : 'Administración'))
+        })),
         appointments: rows('appointments'),
         leads: rows('leads').map(l => ({ ...l, aiTriage: l.aiTriage ? (typeof l.aiTriage === 'string' ? JSON.parse(l.aiTriage) : l.aiTriage) : null })),
         records: rows('records').map(r => ({ ...r, content: JSON.parse(r.content) })),
@@ -903,6 +907,44 @@ async function handle(req, res) {
         date: clinicDate(),
         mode: 'ACTIVE'
       });
+    }
+
+    if (path === '/api/staff' && method === 'GET') {
+      const users = all('SELECT id, workspaceId, role, email, name FROM users WHERE workspaceId=?', w);
+      const docs = all('SELECT id, workspaceId, name, specialty, license_number FROM doctors WHERE workspaceId=?', w);
+      return json(res, 200, users.map(su => ({
+        ...su,
+        specialty: docs.find(d => d.id === su.id)?.specialty || (su.role === 'RECEPTIONIST' ? 'Recepción y Turnos' : (su.role === 'DOCTOR' ? 'Medicina General' : 'Administración'))
+      })));
+    }
+
+    if (path === '/api/staff' && method === 'POST') {
+      const b = await body(req);
+      const email = text(b.email, 'Correo', 5, 120).toLowerCase();
+      const name = text(b.name, 'Nombre', 2, 120);
+      const role = choose(b.role || 'RECEPTIONIST', ['CLINIC_ADMIN', 'RECEPTIONIST', 'DOCTOR'], 'Rol');
+      const password = text(b.password, 'Contraseña', 8, 100);
+      const existing = q('SELECT id FROM users WHERE email=?', email);
+      if (existing) fail(409, 'Ya existe un usuario registrado con ese correo electrónico.');
+      const s = salt();
+      const id = uid();
+      run('INSERT INTO users(id, workspaceId, role, email, name, salt, passwordHash) VALUES(?,?,?,?,?,?,?)',
+        id, w, role, email, name, s, hash(password + s));
+      if (role === 'DOCTOR') {
+        run('INSERT INTO doctors(id, workspaceId, name, specialty) VALUES(?,?,?,?)',
+          id, w, name, text(b.specialty || 'Medicina General', 'Especialidad', 2, 100));
+      }
+      audit(u, 'STAFF_MEMBER_CREATED', 'user', id, `Miembro ${name} creado con rol ${role}.`);
+      return json(res, 201, { id, email, name, role, workspaceId: w });
+    }
+
+    const staffDelMatch = path.match(/^\/api\/staff\/([^/]+)$/);
+    if (staffDelMatch && method === 'DELETE') {
+      const staffId = staffDelMatch[1];
+      run('DELETE FROM users WHERE workspaceId=? AND id=?', w, staffId);
+      run('DELETE FROM doctors WHERE workspaceId=? AND id=?', w, staffId);
+      audit(u, 'STAFF_MEMBER_DELETED', 'user', staffId, 'Miembro del personal eliminado.');
+      return json(res, 200, { success: true });
     }
 
     // Enviar recordatorio de turno por WhatsApp

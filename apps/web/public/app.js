@@ -15,6 +15,7 @@ const paths = {
   schedule: '/schedule',
   pipeline: '/pipeline',
   records: '/records',
+  staff: '/staff',
   inventory: '/inventory',
   billing: '/billing',
   analytics: '/analytics',
@@ -30,6 +31,7 @@ const titles = {
   schedule: 'Agenda',
   pipeline: 'Seguimiento',
   records: 'Historia clínica',
+  staff: 'Equipo y Personal',
   inventory: 'Inventario de Insumos',
   billing: 'Cobros y facturación',
   analytics: 'Rendimiento',
@@ -57,17 +59,28 @@ const statusMap = {
   DRAFT: ['Borrador', 'amber'],
   ISSUED: ['Emitido', 'green'],
   CONNECTED: ['Conectado', 'green'],
-  NOT_CONNECTED: ['Sin conectar', 'gray']
+  NOT_CONNECTED: ['Sin conectar', 'gray'],
+  RECEPTIONIST: ['Secretaría / Recepción', 'amber'],
+  DOCTOR: ['Médico / Profesional', 'green'],
+  CLINIC_ADMIN: ['Admin Clínica', 'blue'],
+  SUPER_ADMIN: ['Super Admin', 'primary'],
+  SURGERY: ['Cirugía / Quirófano', 'red'],
+  PROCEDURE: ['Tratamiento / Procedimiento', 'blue'],
+  CONSULTATION: ['Consulta Médica', 'green'],
+  FOLLOW_UP: ['Control / Seguimiento', 'amber']
 };
 
 const types = {
-  CONSULTATION: 'Primera consulta',
-  FOLLOW_UP: 'Control',
-  PROCEDURE: 'Procedimiento',
-  SURGERY: 'Cirugía'
+  CONSULTATION: 'Consulta Médica / Primera Vez',
+  SURGERY: 'Intervención Quirúrgica / Cirugía',
+  PROCEDURE: 'Tratamiento / Procedimiento Ambulatorio',
+  FOLLOW_UP: 'Control Post-Tratamiento / Seguimiento'
 };
 
 const auditLabels = {
+  STAFF_MEMBER_CREATED: 'Miembro del equipo registrado',
+  STAFF_MEMBER_DELETED: 'Miembro del equipo eliminado',
+  APPOINTMENT_REASSIGNED: 'Turno reasignado de profesional',
   SYSTEM_INITIALIZED: 'Sistema inicializado',
   LOGIN: 'Inicio de sesión',
   PATIENT_CREATED: 'Paciente registrado',
@@ -130,7 +143,8 @@ const drawings = {
   external: '<path d="M14 3h7v7m0-7L10 14m-1-9H4v15h15v-5"/>',
   send: '<path d="m22 2-7 20-4-9-9-4zM22 2 11 13"/>',
   activity: '<path d="M2 12h5l3-8 4 16 3-8h5"/>',
-  eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'
+  eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  usercheck: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="16 11 18 13 22 9"/>'
 };
 
 function icon(name, size = 18) {
@@ -169,6 +183,10 @@ const S = {
   date: dateKey(),
   calendar: 'day',
   doctor: '',
+  staffSearch: '',
+  staffRole: '',
+  scheduleCategory: 'ALL',
+  scheduleMode: 'timeline',
   patientSearch: '',
   patientStatus: '',
   selectedPatient: null,
@@ -392,7 +410,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
   }
 
   if (path === '/api/state') {
-    const [wsRes, patRes, docRes, apptRes, leadRes, recRes, invRes, setRes, integRes] = await Promise.all([
+    const [wsRes, patRes, docRes, apptRes, leadRes, recRes, invRes, setRes, integRes, usrRes] = await Promise.all([
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?id=eq.${currentWorkspaceId}`, { headers: authHeaders }),
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }),
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/doctors?workspace_id=eq.${currentWorkspaceId}`, { headers: authHeaders }),
@@ -401,7 +419,8 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/records?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }),
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory?workspace_id=eq.${currentWorkspaceId}&order=name.asc`, { headers: authHeaders }),
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/settings?workspace_id=eq.${currentWorkspaceId}`, { headers: authHeaders }),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?select=*&order=id`, { headers: authHeaders })
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?select=*&order=id`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/users?workspace_id=eq.${currentWorkspaceId}`, { headers: authHeaders })
     ]);
 
     const ws = (await wsRes.json())?.[0] || { id: currentWorkspaceId, name: 'Clínica' };
@@ -413,11 +432,39 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     const inventory = (await invRes.json()) || [];
     const settings = (await setRes.json())?.[0]?.value || { pauseBilling: false, pauseWebhooks: false, pauseAssistant: false };
     const integrations = (await integRes.json()) || [];
+    const rawUsers = (await usrRes.json()) || [];
+
+    const staff = rawUsers.map(u => {
+      const doc = doctors.find(d => d.id === u.id || d.name?.toLowerCase() === u.name?.toLowerCase());
+      return {
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        role: u.role,
+        specialty: doc?.specialty || (u.role === 'RECEPTIONIST' ? 'Recepción y Admisión de Turnos' : (u.role === 'DOCTOR' ? 'Medicina General / Especialista' : 'Dirección y Administración General')),
+        licenseNumber: doc?.license_number || '',
+        createdAt: u.created_at
+      };
+    });
+    for (const d of doctors) {
+      if (!staff.some(s => s.id === d.id || s.name?.toLowerCase() === d.name?.toLowerCase())) {
+        staff.push({
+          id: d.id,
+          email: (d.name.toLowerCase().replace(/[^a-z0-9]+/g, '.') + '@clinica.com'),
+          name: d.name,
+          role: 'DOCTOR',
+          specialty: d.specialty || 'Especialista Médico',
+          licenseNumber: d.license_number || '',
+          createdAt: d.created_at || new Date().toISOString()
+        });
+      }
+    }
 
     return {
       workspace: ws,
       patients: patients.map(p => ({ ...p, firstName: p.first_name, lastName: p.last_name, medicalHistory: p.medical_history, createdAt: p.created_at, updatedAt: p.updated_at })),
       doctors: doctors.map(d => ({ ...d })),
+      staff,
       appointments: appointments.map(a => ({ ...a, patientId: a.patient_id, doctorId: a.doctor_id, startAt: a.start_at, endAt: a.end_at, createdAt: a.created_at })),
       leads: leads.map(l => ({ ...l, createdAt: l.created_at, updatedAt: l.updated_at })),
       records: records.map(r => ({ ...r, patientId: r.patient_id, previousHash: r.previous_hash, amendmentOf: r.amendment_of, createdAt: r.created_at })),
@@ -430,6 +477,127 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       date: dateKey(),
       mode: 'ACTIVE'
     };
+  }
+
+  if (path === '/api/staff' && method === 'POST') {
+    const role = body.role || 'RECEPTIONIST';
+    const userRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/rpc/create_clinic_user`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        p_email: body.email.toLowerCase().trim(),
+        p_password: body.password.trim(),
+        p_name: body.name.trim(),
+        p_workspace_id: currentWorkspaceId
+      })
+    });
+    if (!userRes.ok) {
+      const err = await userRes.json().catch(() => ({}));
+      throw Error(err.message || 'Error al crear usuario en Supabase.');
+    }
+    const created = await userRes.json();
+    const userId = created.id;
+
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/users?id=eq.${userId}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify({ role })
+    });
+
+    if (role === 'DOCTOR') {
+      await fetch(`${SUPABASE_CONFIG.url}/rest/v1/doctors`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          id: userId,
+          workspace_id: currentWorkspaceId,
+          name: body.name.trim(),
+          specialty: body.specialty?.trim() || 'Medicina General / Especialista',
+          license_number: body.licenseNumber?.trim() || ''
+        })
+      });
+    }
+
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/audit_logs`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        id: 'audit-' + Date.now(),
+        workspace_id: currentWorkspaceId,
+        actor: S.session?.user?.name || 'Administrador',
+        action: 'STAFF_MEMBER_CREATED',
+        entity: 'user',
+        entity_id: userId,
+        details: `Miembro ${body.name} (${body.email}) creado con rol ${role}.`
+      })
+    }).catch(() => {});
+
+    return { id: userId, email: body.email, name: body.name, role };
+  }
+
+  const staffDelMatch = path.match(/^\/api\/staff\/([^/]+)$/);
+  if (staffDelMatch && method === 'DELETE') {
+    const staffId = staffDelMatch[1];
+    await Promise.all([
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/users?id=eq.${staffId}&workspace_id=eq.${currentWorkspaceId}`, {
+        method: 'DELETE',
+        headers: authHeaders
+      }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/doctors?id=eq.${staffId}&workspace_id=eq.${currentWorkspaceId}`, {
+        method: 'DELETE',
+        headers: authHeaders
+      })
+    ]);
+    return { success: true };
+  }
+
+  if (path === '/api/appointments' && method === 'POST') {
+    const newAppt = {
+      id: 'apt-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      workspace_id: currentWorkspaceId,
+      patient_id: body.patientId,
+      doctor_id: body.doctorId || S.data?.doctors?.[0]?.id,
+      start_at: body.startAt || localAt(body.date, body.time),
+      end_at: body.endAt || new Date(Date.parse(body.startAt || localAt(body.date, body.time)) + (body.duration || 30) * 60000).toISOString(),
+      duration: Number(body.duration) || 30,
+      type: body.type || 'CONSULTATION',
+      status: body.status || 'PENDING',
+      notes: body.notes || ''
+    };
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newAppt)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw Error(err.message || 'Error al guardar el turno.');
+    }
+    return newAppt;
+  }
+
+  const apptPatchMatch = path.match(/^\/api\/appointments\/([^/]+)$/);
+  if (apptPatchMatch && method === 'PATCH') {
+    const apptId = apptPatchMatch[1];
+    const patchData = {};
+    if (body.status) patchData.status = body.status;
+    if (body.doctorId) patchData.doctor_id = body.doctorId;
+    if (body.startAt) patchData.start_at = body.startAt;
+    if (body.endAt) patchData.end_at = body.endAt;
+    if (body.duration) patchData.duration = Number(body.duration);
+    if (body.type) patchData.type = body.type;
+    if (body.notes !== undefined) patchData.notes = body.notes;
+
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?id=eq.${apptId}&workspace_id=eq.${currentWorkspaceId}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(patchData)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw Error(err.message || 'Error al actualizar el turno.');
+    }
+    return { id: apptId, ...patchData };
   }
 
   if (path === '/api/settings' && method === 'PATCH') {
@@ -600,7 +768,8 @@ function shell() {
                 navItem('settings', 'settings') +
                 navItem('home', 'home') +
                 navItem('schedule', 'calendar', activeDay().length) +
-                navItem('patients', 'users')
+                navItem('patients', 'users') +
+                navItem('staff', 'usercheck', (d?.staff || []).length || (d?.doctors || []).length)
               : navItem('admin', 'building') + navItem('integrations', 'plug') + navItem('audit', 'activity') + navItem('settings', 'settings')
             )
           : navItem('home', 'home') +
@@ -608,9 +777,12 @@ function shell() {
             navItem('patients', 'users') +
             navItem('pipeline', 'pipeline', (d?.leads || []).filter(l => l.status === 'NEW').length) +
             navItem('records', 'file') +
+            navItem('staff', 'usercheck', (d?.staff || []).length || (d?.doctors || []).length) +
             navItem('inventory', 'box', (d?.inventory || []).filter(i => i.quantity <= i.minQuantity).length) +
             navItem('billing', 'wallet') +
-            navItem('analytics', 'chart')
+            navItem('analytics', 'chart') +
+            navItem('integrations', 'plug') +
+            navItem('settings', 'settings')
         }
       </nav>
 
@@ -671,6 +843,7 @@ function content() {
     schedule: scheduleView,
     pipeline: pipelineView,
     records: recordsView,
+    staff: staffView,
     inventory: inventoryView,
     billing: billingView,
     analytics: analyticsView,
@@ -825,48 +998,149 @@ function patientsView() {
 }
 
 function scheduleView() {
-  const chosen = S.data.appointments.filter(a => dateKey(a.startAt) === S.date && (!S.doctor || a.doctorId === S.doctor)).sort((a, b) => a.startAt.localeCompare(b.startAt));
-  let day = '';
-  if (S.calendar === 'day') {
-    const keys = new Set(Array.from({ length: 18 }, (_, i) => `${String(9 + Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`));
-    for (const a of chosen) keys.add(fmtTime(a.startAt));
-    day = [...keys].sort().map(t => {
-      const active = chosen.filter(a => fmtTime(a.startAt) === t && a.status !== 'CANCELLED');
-      const busy = chosen.filter(a => a.status !== 'CANCELLED' && a.startAt <= localAt(S.date, t) && a.endAt > localAt(S.date, t));
-      const canBook = busy.length < (S.doctor ? 1 : S.data.doctors.length);
-      return `<div class="slot">
-        <span class="slot-time">${t}</span>
-        <div class="slot-content">
-          ${active.map(a => `<button class="slot-booking" data-action="appointment-detail" data-id="${a.id}">
-            ${avatar(nameOf(patientBy(a.patientId)))}
-            <span class="grow" style="text-align:left">
-              <span class="patient-name">${esc(nameOf(patientBy(a.patientId)))}</span>
-              <span class="patient-sub" style="display:block">${esc(types[a.type])} · ${esc(doctorBy(a.doctorId)?.name)}</span>
-            </span>
-            ${badge(a.status)}
-          </button>`).join('')}
-          ${canBook ? `<button class="free-slot" data-action="new-appointment" data-time="${t}">${icon('plus', 12)} ${active.length || busy.length ? 'Otro profesional disponible' : 'Espacio disponible'}</button>` : ''}
+  const allDayAppointments = (S.data.appointments || []).filter(a => dateKey(a.startAt) === S.date && a.status !== 'CANCELLED');
+  const chosen = allDayAppointments.filter(a => {
+    const matchesDoctor = !S.doctor || a.doctorId === S.doctor;
+    const matchesCategory = !S.scheduleCategory || S.scheduleCategory === 'ALL' || a.type === S.scheduleCategory;
+    return matchesDoctor && matchesCategory;
+  }).sort((a, b) => a.startAt.localeCompare(b.startAt));
+
+  const totalCount = allDayAppointments.length;
+  const consultationCount = allDayAppointments.filter(a => a.type === 'CONSULTATION').length;
+  const surgeryCount = allDayAppointments.filter(a => a.type === 'SURGERY').length;
+  const procedureCount = allDayAppointments.filter(a => a.type === 'PROCEDURE').length;
+  const followUpCount = allDayAppointments.filter(a => a.type === 'FOLLOW_UP').length;
+
+  const categoryFilters = `
+  <div class="category-filter-strip">
+    <button class="category-pill ${(!S.scheduleCategory || S.scheduleCategory === 'ALL') ? 'active' : ''}" data-action="schedule-category" data-value="ALL" title="Ver todos los turnos sin filtrar por tipo">
+      <span>Todos los turnos</span> <span class="pill-count">${totalCount}</span>
+    </button>
+    <button class="category-pill green ${S.scheduleCategory === 'CONSULTATION' ? 'active' : ''}" data-action="schedule-category" data-value="CONSULTATION" title="Ver solo consultas y primeras veces">
+      ${icon('file', 13)} <span>Consultas</span> <span class="pill-count">${consultationCount}</span>
+    </button>
+    <button class="category-pill red ${S.scheduleCategory === 'SURGERY' ? 'active' : ''}" data-action="schedule-category" data-value="SURGERY" title="Ver solo cirugías y quirófano">
+      ${icon('warning', 13)} <span>Cirugías / Quirófano</span> <span class="pill-count">${surgeryCount}</span>
+    </button>
+    <button class="category-pill blue ${S.scheduleCategory === 'PROCEDURE' ? 'active' : ''}" data-action="schedule-category" data-value="PROCEDURE" title="Ver solo tratamientos y procedimientos">
+      ${icon('spark', 13)} <span>Tratamientos</span> <span class="pill-count">${procedureCount}</span>
+    </button>
+    <button class="category-pill amber ${S.scheduleCategory === 'FOLLOW_UP' ? 'active' : ''}" data-action="schedule-category" data-value="FOLLOW_UP" title="Ver solo controles y seguimiento">
+      ${icon('clock', 13)} <span>Controles</span> <span class="pill-count">${followUpCount}</span>
+    </button>
+  </div>`;
+
+  let mainScheduleHtml = '';
+
+  if (S.scheduleMode === 'by-treatment') {
+    // VISTA DESGLOSADA POR FIN DEL PACIENTE / TRATAMIENTO
+    const renderTreatmentSection = (typeKey, title, badgeColor, headerClass, emptyText, iconName) => {
+      if (S.scheduleCategory && S.scheduleCategory !== 'ALL' && S.scheduleCategory !== typeKey) return '';
+      const items = (S.doctor ? chosen : allDayAppointments).filter(a => a.type === typeKey);
+      return `
+      <div class="treatment-section">
+        <div class="treatment-header ${headerClass}">
+          <h3>${icon(iconName, 16)} <span>${title}</span></h3>
+          <span class="badge ${badgeColor}">${items.length} ${items.length === 1 ? 'paciente' : 'pacientes'}</span>
         </div>
+        ${items.length ? `
+          <div class="treatment-cards">
+            ${items.map(a => {
+              const p = patientBy(a.patientId);
+              const doc = doctorBy(a.doctorId);
+              return `
+              <div class="treatment-card">
+                <div class="treatment-card-top">
+                  <span class="treatment-card-time">${icon('clock', 13)} ${fmtTime(a.startAt)} hs <small style="font-weight:400;color:#7a8c7e">(${a.duration} min)</small></span>
+                  ${badge(a.status)}
+                </div>
+                <div style="cursor:pointer" data-action="appointment-detail" data-id="${a.id}">
+                  <div class="treatment-card-patient">${esc(nameOf(p))}</div>
+                  <div class="tiny muted">DNI: ${esc(p?.dni || '—')} · Cobertura: ${esc(p?.coverage || 'Particular')}</div>
+                </div>
+                <div class="treatment-card-doctor">
+                  ${avatar(doc?.name || 'Médico')}
+                  <div>
+                    <strong style="font-size:11px;color:#18362b">${esc(doc?.name || 'Sin profesional asignado')}</strong>
+                    <div class="tiny muted">${esc(doc?.specialty || 'Especialista')}</div>
+                  </div>
+                </div>
+                ${a.notes ? `<div class="treatment-card-notes"><strong>Fin / Detalle:</strong> ${esc(a.notes)}</div>` : ''}
+                <div class="treatment-card-actions">
+                  <button class="btn small ghost" data-action="appointment-detail" data-id="${a.id}" title="Ver detalle del turno">${icon('eye', 13)} Detalle</button>
+                  <button class="btn small" data-action="reschedule" data-id="${a.id}" title="Reprogramar horario">${icon('calendar', 13)} Reprogramar</button>
+                  <button class="icon-btn" data-action="send-wa-reminder" data-id="${a.id}" title="Enviar recordatorio WhatsApp">${icon('phone', 13)}</button>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>
+        ` : `<div class="empty-treatment-category">${icon('checkcircle', 15)} <span>${emptyText}</span></div>`}
       </div>`;
-    }).join('');
+    };
+
+    mainScheduleHtml = `
+      <div style="padding:16px 20px 8px">
+        ${renderTreatmentSection('SURGERY', 'Intervenciones Quirúrgicas & Cirugías', 'red', 'surgery', 'Sin cirugías programadas para esta fecha.', 'warning')}
+        ${renderTreatmentSection('PROCEDURE', 'Tratamientos & Procedimientos Ambulatorios', 'blue', 'procedure', 'Sin tratamientos ni procedimientos para esta fecha.', 'spark')}
+        ${renderTreatmentSection('CONSULTATION', 'Consultas Médicas & Evaluaciones de Primera Vez', 'green', 'consultation', 'Sin consultas médicas para esta fecha.', 'file')}
+        ${renderTreatmentSection('FOLLOW_UP', 'Controles y Seguimiento Post-Tratamiento', 'amber', 'follow_up', 'Sin controles médicos para esta fecha.', 'clock')}
+      </div>`;
   } else {
-    const weekday = new Date(`${S.date}T12:00:00-03:00`).getUTCDay();
-    const monday = plusDays(S.date, weekday === 0 ? -6 : 1 - weekday);
-    day = `<div class="week-grid">${Array.from({ length: 5 }, (_, i) => {
-      const d = plusDays(monday, i),
-        rows = S.data.appointments.filter(a => dateKey(a.startAt) === d && a.status !== 'CANCELLED' && (!S.doctor || a.doctorId === S.doctor)).sort((a, b) => a.startAt.localeCompare(b.startAt));
-      return `<div class="week-day">
-        <div class="week-heading">${esc(fmtDate(d, true))}</div>
-        ${rows.map(a => `<button class="week-event" data-action="appointment-detail" data-id="${a.id}">
-          <b>${fmtTime(a.startAt)}</b> · ${esc(nameOf(patientBy(a.patientId)))}
-          <div class="tiny muted">${esc(types[a.type])}</div>
-        </button>`).join('')}
-        <button class="free-slot" style="width:100%" data-action="new-appointment" data-date="${d}">${icon('plus', 12)} Agendar</button>
-      </div>`;
-    }).join('')}</div>`;
+    // VISTA CRONOLÓGICA (DÍA / SEMANA)
+    if (S.calendar === 'day') {
+      const keys = new Set(Array.from({ length: 18 }, (_, i) => `${String(9 + Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`));
+      for (const a of chosen) keys.add(fmtTime(a.startAt));
+      mainScheduleHtml = [...keys].sort().map(t => {
+        const active = chosen.filter(a => fmtTime(a.startAt) === t && a.status !== 'CANCELLED');
+        const busy = chosen.filter(a => a.status !== 'CANCELLED' && a.startAt <= localAt(S.date, t) && a.endAt > localAt(S.date, t));
+        const canBook = busy.length < (S.doctor ? 1 : S.data.doctors.length);
+        return `<div class="slot">
+          <span class="slot-time">${t}</span>
+          <div class="slot-content">
+            ${active.map(a => {
+              const doc = doctorBy(a.doctorId);
+              const p = patientBy(a.patientId);
+              return `<button class="slot-booking" data-action="appointment-detail" data-id="${a.id}">
+                ${avatar(nameOf(p))}
+                <span class="grow" style="text-align:left">
+                  <span class="patient-name">${esc(nameOf(p))}</span>
+                  <span class="patient-sub" style="display:block">
+                    <b>${badge(a.type)}</b> · ${esc(doc?.name || 'Profesional')}
+                  </span>
+                </span>
+                ${badge(a.status)}
+              </button>`;
+            }).join('')}
+            ${canBook ? `<button class="free-slot" data-action="new-appointment" data-time="${t}">${icon('plus', 12)} ${active.length || busy.length ? 'Otro profesional disponible' : 'Espacio disponible'}</button>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+    } else {
+      const weekday = new Date(`${S.date}T12:00:00-03:00`).getUTCDay();
+      const monday = plusDays(S.date, weekday === 0 ? -6 : 1 - weekday);
+      mainScheduleHtml = `<div class="week-grid">${Array.from({ length: 5 }, (_, i) => {
+        const d = plusDays(monday, i),
+          rows = (S.data.appointments || []).filter(a => {
+            const matchesDay = dateKey(a.startAt) === d && a.status !== 'CANCELLED';
+            const matchesDoctor = !S.doctor || a.doctorId === S.doctor;
+            const matchesCategory = !S.scheduleCategory || S.scheduleCategory === 'ALL' || a.type === S.scheduleCategory;
+            return matchesDay && matchesDoctor && matchesCategory;
+          }).sort((a, b) => a.startAt.localeCompare(b.startAt));
+        return `<div class="week-day">
+          <div class="week-heading">${esc(fmtDate(d, true))}</div>
+          ${rows.map(a => `<button class="week-event" data-action="appointment-detail" data-id="${a.id}">
+            <b>${fmtTime(a.startAt)}</b> · ${esc(nameOf(patientBy(a.patientId)))}
+            <div class="tiny muted">${badge(a.type)}</div>
+          </button>`).join('')}
+          <button class="free-slot" style="width:100%" data-action="new-appointment" data-date="${d}">${icon('plus', 12)} Agendar</button>
+        </div>`;
+      }).join('')}</div>`;
+    }
   }
 
-  return heading('Agenda Médica', 'Gestión de turnos por profesional y consultorio. Horarios en Buenos Aires (UTC−03).', btn('Nuevo turno', 'new-appointment', 'plus', 'primary')) +
+  return heading('Agenda Médica', 'Gestión de turnos por profesional y consultorio. Horarios en Buenos Aires (UTC−03).',
+    btn('Nuevo turno', 'new-appointment', 'plus', 'primary')
+  ) +
   `<div class="schedule-layout">
     <section class="panel">
       <div class="toolbar between">
@@ -876,34 +1150,209 @@ function scheduleView() {
           <button class="icon-btn" data-action="next-date" aria-label="Día siguiente">${icon('chevron', 15)}</button>
           ${btn('Hoy', 'today', '', 'small')}
         </div>
-        <div class="segmented">
-          <button data-action="calendar-mode" data-value="day" class="${S.calendar === 'day' ? 'active' : ''}">Día</button>
-          <button data-action="calendar-mode" data-value="week" class="${S.calendar === 'week' ? 'active' : ''}">Semana</button>
+        <div style="display:flex;gap:10px;align-items:center">
+          <div class="segmented">
+            <button data-action="schedule-mode" data-value="timeline" class="${S.scheduleMode !== 'by-treatment' ? 'active' : ''}">Línea Horaria</button>
+            <button data-action="schedule-mode" data-value="by-treatment" class="${S.scheduleMode === 'by-treatment' ? 'active' : ''}">Desglose por Tratamiento</button>
+          </div>
+          ${S.scheduleMode !== 'by-treatment' ? `
+            <div class="segmented">
+              <button data-action="calendar-mode" data-value="day" class="${S.calendar === 'day' ? 'active' : ''}">Día</button>
+              <button data-action="calendar-mode" data-value="week" class="${S.calendar === 'week' ? 'active' : ''}">Semana</button>
+            </div>
+          ` : ''}
         </div>
       </div>
-      <div class="toolbar">
-        <select data-change="doctor" aria-label="Filtrar por profesional">
-          <option value="">Todos los profesionales</option>
-          ${S.data.doctors.map(d => `<option value="${d.id}" ${S.doctor === d.id ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}
-        </select>
-        <span class="muted tiny">${chosen.filter(a => a.status !== 'CANCELLED').length} turnos programados</span>
+      <div class="toolbar between">
+        <div style="display:flex;align-items:center;gap:10px">
+          <select data-change="doctor" aria-label="Filtrar por profesional">
+            <option value="">Todos los profesionales</option>
+            ${(S.data.doctors || []).map(d => `<option value="${d.id}" ${S.doctor === d.id ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}
+          </select>
+          <span class="muted tiny">${chosen.length} turnos visualizados</span>
+        </div>
       </div>
-      ${day}
+      <div style="padding:0 20px">
+        ${categoryFilters}
+      </div>
+      ${mainScheduleHtml}
       <div class="panel-footer">
         <span>Validación automática de superposiciones y disponibilidad</span>
-        <span>${chosen.filter(a => a.status === 'CANCELLED').length} cancelados</span>
+        <span>${allDayAppointments.filter(a => a.status === 'CANCELLED').length} cancelados</span>
       </div>
     </section>
+
     <aside class="stack schedule-aside">
       <section class="panel">
-        <div class="panel-header"><h2>Equipo Profesional</h2></div>
+        <div class="panel-header between">
+          <h2>Equipo Profesional</h2>
+          <button class="btn small ghost" data-action="nav-staff" title="Gestionar personal y accesos">${icon('users', 13)} Personal</button>
+        </div>
         <div class="panel-body">
-          ${S.data.doctors.map((d, i) => `<div class="attention-row">${avatar(d.name, i)}<div><h4>${esc(d.name)}</h4><p>${esc(d.specialty)}</p></div></div>`).join('')}
+          ${S.doctor ? `
+            <div class="doctor-filter-banner">
+              <span>Filtrando por <b>${esc(doctorBy(S.doctor)?.name)}</b></span>
+              <button class="btn small ghost" data-action="clear-doctor-filter" style="padding:2px 6px;height:auto">${icon('close', 12)} Ver todos</button>
+            </div>
+          ` : ''}
+          ${(S.data.doctors || []).length ? (S.data.doctors || []).map((d, i) => {
+            const docAppts = allDayAppointments.filter(a => a.doctorId === d.id);
+            const surgeries = docAppts.filter(a => a.type === 'SURGERY').length;
+            const consultations = docAppts.filter(a => a.type === 'CONSULTATION').length;
+            const procedures = docAppts.filter(a => a.type === 'PROCEDURE').length;
+            const nextAppt = docAppts.find(a => a.status === 'CONFIRMED' || a.status === 'PENDING');
+            const isSelected = S.doctor === d.id;
+            return `
+            <div class="doctor-card-interactive ${isSelected ? 'selected' : ''}" data-action="select-doctor-filter" data-id="${d.id}" title="Hacer clic para filtrar la agenda por este profesional">
+              ${avatar(d.name, i)}
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                  <h4 style="margin:0;font-size:12px;color:#18362b">${esc(d.name)}</h4>
+                  ${isSelected ? `<span style="color:#2a6845">${icon('check', 14)}</span>` : ''}
+                </div>
+                <p style="margin:2px 0 0;font-size:10px;color:#7a8c7e">${esc(d.specialty)}</p>
+                <div class="doctor-card-badge">
+                  ${docAppts.length ? `${docAppts.length} ${docAppts.length === 1 ? 'turno' : 'turnos'} hoy${surgeries ? ` (${surgeries} quiróf.)` : ''}` : 'Sin turnos hoy'}
+                </div>
+                ${nextAppt ? `<div class="tiny muted" style="margin-top:3px">${icon('clock', 11)} Próx: ${fmtTime(nextAppt.startAt)} hs · ${esc(nameOf(patientBy(nextAppt.patientId)))}</div>` : ''}
+              </div>
+            </div>`;
+          }).join('') : `
+            <div class="empty" style="padding:20px 10px">
+              <p style="font-size:11px">Aún no hay profesionales médicos dados de alta.</p>
+              <button class="btn small primary" data-action="new-staff" style="margin-top:8px">${icon('plus', 12)} Agregar Médico</button>
+            </div>
+          `}
         </div>
       </section>
-      <div class="info-box">${icon('shield', 18)}<div><strong>Disponibilidad coordinada</strong><br>La agenda valida en tiempo real cruces de turnos de profesionales y pacientes.</div></div>
+      <div class="info-box">${icon('shield', 18)}<div><strong>Disponibilidad coordinada</strong><br>Haz clic en cualquier profesional para filtrar la agenda y ver sus turnos asignados en tiempo real.</div></div>
     </aside>
   </div>`;
+}
+
+function staffView() {
+  const staff = S.data.staff || [];
+  const search = (S.staffSearch || '').toLowerCase();
+  const roleFilter = S.staffRole || '';
+
+  const filtered = staff.filter(m => {
+    const matchesSearch = !search || [m.name, m.email, m.specialty, m.licenseNumber].some(x => (x || '').toLowerCase().includes(search));
+    const matchesRole = !roleFilter || m.role === roleFilter;
+    return matchesSearch && matchesRole;
+  });
+
+  const totalMembers = staff.length;
+  const doctorsCount = staff.filter(s => s.role === 'DOCTOR').length;
+  const receptionCount = staff.filter(s => s.role === 'RECEPTIONIST').length;
+  const adminCount = staff.filter(s => s.role === 'CLINIC_ADMIN').length;
+
+  return heading('Equipo y Controles de Acceso', 'Gestión de personal de secretaría, equipo médico y permisos de acceso a la plataforma.',
+    btn('Nuevo miembro', 'new-staff', 'plus', 'primary')
+  ) +
+  `<div class="staff-stats">
+    <div class="stat-card">
+      <div class="stat-top"><span>Total Equipo</span><div class="stat-icon">${icon('users', 16)}</div></div>
+      <div class="stat-number">${totalMembers}</div>
+      <div class="stat-bottom muted">Personal registrado</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-top"><span>Médicos y Cirujanos</span><div class="stat-icon">${icon('warning', 16)}</div></div>
+      <div class="stat-number">${doctorsCount}</div>
+      <div class="stat-bottom muted">Profesionales asistenciales</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-top"><span>Secretaría y Admisión</span><div class="stat-icon">${icon('usercheck', 16)}</div></div>
+      <div class="stat-number">${receptionCount}</div>
+      <div class="stat-bottom muted">Gestión de turnos y caja</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-top"><span>Administración</span><div class="stat-icon">${icon('shield', 16)}</div></div>
+      <div class="stat-number">${adminCount}</div>
+      <div class="stat-bottom muted">Acceso directivo</div>
+    </div>
+  </div>
+
+  <section class="panel">
+    <div class="toolbar">
+      <div class="search-field grow">
+        ${icon('search', 15)}
+        <input placeholder="Buscar por nombre, correo o especialidad…" aria-label="Buscar personal" value="${esc(S.staffSearch)}" data-input="staff-search">
+      </div>
+      <select aria-label="Filtrar por rol" data-change="staff-role">
+        <option value="">Todos los roles</option>
+        <option value="DOCTOR" ${S.staffRole === 'DOCTOR' ? 'selected' : ''}>Médicos / Cirujanos</option>
+        <option value="RECEPTIONIST" ${S.staffRole === 'RECEPTIONIST' ? 'selected' : ''}>Secretaría / Recepción</option>
+        <option value="CLINIC_ADMIN" ${S.staffRole === 'CLINIC_ADMIN' ? 'selected' : ''}>Administradores de Clínica</option>
+      </select>
+      <span class="text-sm muted">${filtered.length} miembros</span>
+    </div>
+
+    ${filtered.length ? `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Miembro</th>
+            <th>Rol y Permisos</th>
+            <th>Especialidad / Puesto</th>
+            <th>Matrícula / ID</th>
+            <th>Turnos Asignados</th>
+            <th>Estado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filtered.map((m, i) => {
+            const apptsCount = (S.data.appointments || []).filter(a => a.doctorId === m.id && a.status !== 'CANCELLED').length;
+            return `
+            <tr>
+              <td>
+                <div class="initials-cell">
+                  ${avatar(m.name, i)}
+                  <div>
+                    <strong>${esc(m.name)}</strong>
+                    <div class="tiny muted">${esc(m.email)}</div>
+                  </div>
+                </div>
+              </td>
+              <td>${badge(m.role)}</td>
+              <td>${esc(m.specialty || 'General')}</td>
+              <td><code>${esc(m.licenseNumber || '—')}</code></td>
+              <td><b>${apptsCount}</b> turnos</td>
+              <td><span class="badge green"><i class="dot"></i>Activo</span></td>
+              <td>
+                <div style="display:flex;gap:6px;justify-content:flex-end">
+                  <button class="btn small danger" data-action="delete-staff" data-id="${m.id}" data-name="${esc(m.name)}" title="Eliminar miembro del equipo">${icon('close', 13)} Eliminar</button>
+                </div>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    ` : empty('No se encontró personal registrado', 'Puedes dar de alta a secretarias, médicos y administradores haciendo clic en "Nuevo miembro".', btn('Nuevo miembro', 'new-staff', 'plus', 'primary'))}
+    <div class="panel-footer">
+      <span>Controles de acceso basados en roles (RBAC) con aislamiento por clínica</span>
+      <span>${filtered.length} de ${totalMembers} miembros</span>
+    </div>
+  </section>`;
+}
+
+function staffForm() {
+  const roles = [
+    ['RECEPTIONIST', 'Secretaría / Recepción (Gestión de turnos, pacientes, sala de espera)'],
+    ['DOCTOR', 'Profesional / Médico (Agenda médica, historias clínicas, consultas)'],
+    ['CLINIC_ADMIN', 'Administrador de Clínica (Acceso total a la clínica)']
+  ];
+  const fields =
+    field('Nombre y Apellido *', 'name', 'text', '', 'required minlength="3" maxlength="120" placeholder="Ej: Dra. Carolina Méndez o Lucía Gómez"', true) +
+    field('Correo Electrónico de Acceso *', 'email', 'email', '', 'required placeholder="lucia.gomez@clinica.com"') +
+    selectField('Rol en la clínica *', 'role', roles, 'RECEPTIONIST') +
+    field('Especialidad / Puesto', 'specialty', 'text', '', 'placeholder="Ej: Cirugía Plástica, Dermatología, Recepción"') +
+    field('Matrícula Profesional (Para médicos)', 'licenseNumber', 'text', '', 'placeholder="Ej: MN 145.210"') +
+    field('Contraseña Inicial Provisoria *', 'password', 'password', '', 'required minlength="8" placeholder="Mínimo 8 caracteres" autocomplete="new-password"');
+
+  formDialog('staff', 'Nuevo Miembro del Equipo', 'Asigna credenciales y rol de acceso para el personal de la clínica.', fields, 'Crear miembro del equipo');
 }
 
 function pipelineView() {
@@ -1638,7 +2087,8 @@ function appointmentDetail(id) {
           <span class="badge red">Alerta Activa</span>
         </div>
       </div>` : ''}
-    <div class="form-field full"><div class="info-box">${icon('calendar', 17)}<span><strong>Profesional:</strong> ${esc(doctorBy(a.doctorId)?.name)}<br>${esc(a.notes || 'Sin observaciones adicionales')}</span></div></div>` +
+    <div class="form-field full"><div class="info-box">${icon('calendar', 17)}<span><strong>Profesional actual:</strong> ${esc(doctorBy(a.doctorId)?.name || 'Sin asignar')}<br>${esc(a.notes || 'Sin observaciones adicionales')}</span></div></div>` +
+    selectField('Profesional asignado', 'doctorId', (S.data.doctors || []).map(d => [d.id, `${d.name} (${d.specialty})`]), a.doctorId, true) +
     selectField('Estado del turno', 'status', ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'NO_SHOW'].map(s => [s, statusMap[s][0]]), a.status, true) +
     `<div class="form-field full flex" style="flex-wrap:wrap;gap:8px">
       ${btn('Reprogramar horario', 'reschedule', 'calendar', '', 'type="button" data-id="' + id + '"')}
@@ -2038,6 +2488,22 @@ document.addEventListener('click', async e => {
       case 'next-date': S.date = plusDays(S.date, S.calendar === 'week' ? 7 : 1); contentOnly(); break;
       case 'today': S.date = S.data?.date || dateKey(); contentOnly(); break;
       case 'calendar-mode': S.calendar = el.dataset.value; contentOnly(); break;
+      case 'schedule-category': S.scheduleCategory = el.dataset.value; contentOnly(); break;
+      case 'schedule-mode': S.scheduleMode = el.dataset.value; contentOnly(); break;
+      case 'select-doctor-filter': S.doctor = S.doctor === id ? '' : id; contentOnly(); break;
+      case 'clear-doctor-filter': S.doctor = ''; contentOnly(); break;
+      case 'new-staff': staffForm(); break;
+      case 'nav-staff': await navigate('staff'); break;
+      case 'delete-staff': {
+        const name = el.dataset.name || 'este miembro';
+        if (confirm(`¿Confirmas eliminar a "${name}" del equipo de la clínica?`)) {
+          await api('/api/staff/' + id, 'DELETE');
+          toast('Miembro eliminado del equipo.');
+          await refresh();
+          contentOnly();
+        }
+        break;
+      }
       case 'new-lead': leadForm(); break;
       case 'ai-triage-all': {
         el.disabled = true;
@@ -2307,8 +2773,13 @@ document.addEventListener('submit', async e => {
         break;
       }
       case 'appointment-status':
-        await api('/api/appointments/' + form.dataset.id, 'PATCH', { status: b.status });
-        message = 'Estado del turno actualizado.';
+        await api('/api/appointments/' + form.dataset.id, 'PATCH', { status: b.status, doctorId: b.doctorId });
+        message = 'Estado y profesional del turno actualizados.';
+        break;
+      case 'staff':
+        await api('/api/staff', 'POST', b);
+        message = 'Nuevo miembro del equipo registrado con éxito.';
+        S.view = 'staff';
         break;
       case 'lead':
         await api('/api/leads', 'POST', b);
@@ -2411,6 +2882,16 @@ document.addEventListener('input', e => {
       input.setSelectionRange(start, start);
     }
   }
+  if (e.target.dataset.input === 'staff-search') {
+    const value = e.target.value, start = e.target.selectionStart;
+    S.staffSearch = value;
+    contentOnly();
+    const input = document.querySelector('input[data-input="staff-search"]');
+    if (input) {
+      input.focus();
+      input.setSelectionRange(start, start);
+    }
+  }
   if (e.target.dataset.action === 'search-inventory') {
     const value = e.target.value, start = e.target.selectionStart;
     S.inventorySearch = value;
@@ -2428,6 +2909,7 @@ document.addEventListener('change', async e => {
   if (!key) return;
   try {
     if (key === 'patient-status') { S.patientStatus = el.value; contentOnly(); }
+    if (key === 'staff-role') { S.staffRole = el.value; contentOnly(); }
     if (key === 'date') { if (el.value) S.date = el.value; contentOnly(); }
     if (key === 'doctor') { S.doctor = el.value; contentOnly(); }
     if (key === 'lead-status') {
