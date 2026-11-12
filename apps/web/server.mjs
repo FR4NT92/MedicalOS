@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS inventory(
 CREATE TABLE IF NOT EXISTS audit(id TEXT PRIMARY KEY,workspaceId TEXT REFERENCES workspaces(id),actor TEXT NOT NULL,action TEXT NOT NULL,entity TEXT NOT NULL,entityId TEXT NOT NULL,createdAt TEXT NOT NULL,details TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS agendas(id TEXT PRIMARY KEY,workspaceId TEXT NOT NULL REFERENCES workspaces(id),name TEXT NOT NULL,type TEXT NOT NULL DEFAULT 'MEDICAL',color TEXT NOT NULL DEFAULT '#1b4c37',description TEXT,createdAt TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS quotes(id TEXT PRIMARY KEY,workspaceId TEXT NOT NULL REFERENCES workspaces(id),patientId TEXT NOT NULL,doctorId TEXT,number TEXT NOT NULL,title TEXT NOT NULL,items TEXT NOT NULL DEFAULT '[]',subtotal REAL NOT NULL DEFAULT 0,discount REAL NOT NULL DEFAULT 0,total REAL NOT NULL DEFAULT 0,currency TEXT NOT NULL DEFAULT 'ARS',validUntil TEXT,status TEXT NOT NULL DEFAULT 'PENDING',notes TEXT,createdAt TEXT NOT NULL,updatedAt TEXT NOT NULL,FOREIGN KEY(workspaceId,patientId) REFERENCES patients(workspaceId,id));
+CREATE TABLE IF NOT EXISTS medical_orders(id TEXT PRIMARY KEY, workspaceId TEXT NOT NULL REFERENCES workspaces(id), patientId TEXT NOT NULL, doctorId TEXT, doctorName TEXT NOT NULL, recordId TEXT, instructions TEXT NOT NULL, items TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'PENDING', administeredBy TEXT, administeredAt TEXT, notes TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, FOREIGN KEY(workspaceId,patientId) REFERENCES patients(workspaceId,id));
 `);
 
 try { db.exec('ALTER TABLE leads ADD COLUMN aiTriage TEXT'); } catch {}
@@ -1027,11 +1028,12 @@ async function handle(req, res) {
         doctors: rows('doctors'),
         staff: all('SELECT id, workspaceId, role, email, name FROM users WHERE workspaceId=?', w).map(su => ({
           ...su,
-          specialty: (all('SELECT id, specialty FROM doctors WHERE workspaceId=?', w).find(d => d.id === su.id)?.specialty) || (su.role === 'RECEPTIONIST' ? 'Recepción y Turnos' : (su.role === 'DOCTOR' ? 'Medicina General' : 'Administración'))
+          specialty: (all('SELECT id, specialty FROM doctors WHERE workspaceId=?', w).find(d => d.id === su.id)?.specialty) || (su.role === 'RECEPTIONIST' ? 'Recepción y Turnos' : (su.role === 'DOCTOR' ? 'Medicina General' : (su.role === 'NURSE' ? 'Enfermería y Cuidados' : 'Administración')))
         })),
         appointments: rows('appointments'),
         agendas: rows('agendas'),
         quotes: rows('quotes').map(q => ({ ...q, items: typeof q.items === 'string' ? JSON.parse(q.items) : (q.items || []) })),
+        medicalOrders: rows('medical_orders').map(mo => ({ ...mo, items: typeof mo.items === 'string' ? JSON.parse(mo.items) : (mo.items || []) })),
         leads: rows('leads').map(l => ({ ...l, aiTriage: l.aiTriage ? (typeof l.aiTriage === 'string' ? JSON.parse(l.aiTriage) : l.aiTriage) : null })),
         records: rows('records').map(r => ({ ...r, content: JSON.parse(r.content) })),
         prescriptions: rows('prescriptions'),
@@ -1052,7 +1054,7 @@ async function handle(req, res) {
       const docs = all('SELECT id, workspaceId, name, specialty, license_number FROM doctors WHERE workspaceId=?', w);
       return json(res, 200, users.map(su => ({
         ...su,
-        specialty: docs.find(d => d.id === su.id)?.specialty || (su.role === 'RECEPTIONIST' ? 'Recepción y Turnos' : (su.role === 'DOCTOR' ? 'Medicina General' : 'Administración'))
+        specialty: docs.find(d => d.id === su.id)?.specialty || (su.role === 'RECEPTIONIST' ? 'Recepción y Turnos' : (su.role === 'DOCTOR' ? 'Medicina General' : (su.role === 'NURSE' ? 'Enfermería y Cuidados' : 'Administración')))
       })));
     }
 
@@ -1060,7 +1062,7 @@ async function handle(req, res) {
       const b = await body(req);
       const email = text(b.email, 'Correo', 5, 120).toLowerCase();
       const name = text(b.name, 'Nombre', 2, 120);
-      const role = choose(b.role || 'RECEPTIONIST', ['CLINIC_ADMIN', 'RECEPTIONIST', 'DOCTOR'], 'Rol');
+      const role = choose(b.role || 'RECEPTIONIST', ['CLINIC_ADMIN', 'RECEPTIONIST', 'DOCTOR', 'NURSE'], 'Rol');
       const password = text(b.password, 'Contraseña', 8, 100);
       const existing = q('SELECT id FROM users WHERE email=?', email);
       if (existing) fail(409, 'Ya existe un usuario registrado con ese correo electrónico.');
@@ -1399,6 +1401,12 @@ async function handle(req, res) {
         }).catch(err => console.error('[WhatsApp Background Error]', err.message));
       }
 
+      // Notificación automática por email si el paciente tiene correo registrado
+      const patEmail = q('SELECT email, firstName, lastName FROM patients WHERE id=?', a.patientId);
+      if (patEmail && patEmail.email) {
+        audit(u, 'APPOINTMENT_EMAIL_NOTIFICATION', 'appointment', a.id, `Notificación de turno enviada por email a ${patEmail.email} con archivo .ics de calendario.`);
+      }
+
       return json(res, 201, a);
     }
 
@@ -1416,6 +1424,77 @@ async function handle(req, res) {
         audit(u, 'APPOINTMENT_UPDATED', 'appointment', a.id, `Turno actualizado a ${updated.status}.`);
       });
       return json(res, 200, updated);
+    }
+
+    if (path.startsWith('/api/appointments/') && path.endsWith('/calendar.ics') && method === 'GET') {
+      const id = path.slice('/api/appointments/'.length, -'/calendar.ics'.length);
+      const a = q('SELECT * FROM appointments WHERE workspaceId=? AND id=?', w, id);
+      if (!a) fail(404, 'Turno no encontrado.');
+      const p = patient(w, a.patientId);
+      const doc = q('SELECT * FROM doctors WHERE id=?', a.doctorId);
+      const ws = q('SELECT * FROM workspaces WHERE id=?', w);
+
+      const formatUtc = d => new Date(d).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+      const startUtc = formatUtc(a.startAt);
+      const endUtc = formatUtc(a.endAt);
+      const nowUtc = formatUtc(new Date());
+      const clinicName = ws?.name || 'Medical OS - Clínica';
+
+      const ics = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Medical OS//Abundance Clinic OS//ES',
+        'CALSCALE:GREGORIAN',
+        'METHOD:REQUEST',
+        'BEGIN:VEVENT',
+        `UID:${a.id}@abundancemedical.vercel.app`,
+        `DTSTAMP:${nowUtc}`,
+        `DTSTART:${startUtc}`,
+        `DTEND:${endUtc}`,
+        `SUMMARY:Turno Médico: ${doc?.name || 'Profesional'} - ${clinicName}`,
+        `DESCRIPTION:Turno médico confirmado para ${p.firstName} ${p.lastName} con ${doc?.name || 'Profesional'} (${doc?.specialty || 'Consulta'}).\\nPor favor presentarse 10 minutos antes en consultorios.`,
+        `LOCATION:${clinicName}`,
+        'STATUS:CONFIRMED',
+        `ORGANIZER;CN="${clinicName}":mailto:notificaciones@abundancemedical.com`,
+        `ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;CN="${p.firstName} ${p.lastName}":mailto:${p.email || 'paciente@ejemplo.com'}`,
+        'BEGIN:VALARM',
+        'ACTION:DISPLAY',
+        'DESCRIPTION:Recordatorio de Turno Médico en 24 horas',
+        'TRIGGER:-P1D',
+        'END:VALARM',
+        'BEGIN:VALARM',
+        'ACTION:DISPLAY',
+        'DESCRIPTION:Recordatorio de Turno Médico en 2 horas',
+        'TRIGGER:-PT2H',
+        'END:VALARM',
+        'END:VEVENT',
+        'END:VCALENDAR'
+      ].join('\r\n');
+
+      res.writeHead(200, {
+        'Content-Type': 'text/calendar; charset=utf-8',
+        'Content-Disposition': `attachment; filename="turno-${a.id.slice(0, 8)}.ics"`
+      });
+      return res.end(ics);
+    }
+
+    if (path.startsWith('/api/appointments/') && path.endsWith('/send-email') && method === 'POST') {
+      const id = path.slice('/api/appointments/'.length, -'/send-email'.length);
+      const a = q('SELECT * FROM appointments WHERE workspaceId=? AND id=?', w, id);
+      if (!a) fail(404, 'Turno no encontrado.');
+      const p = patient(w, a.patientId);
+      if (!p.email) fail(400, 'El paciente no tiene un correo electrónico registrado en su ficha.');
+      const ws = q('SELECT * FROM workspaces WHERE id=?', w);
+
+      audit(u, 'APPOINTMENT_EMAIL_CONFIRMATION', 'appointment', a.id, `Confirmación de cita enviada por correo a ${p.email} con archivo .ics.`);
+      return json(res, 200, {
+        ok: true,
+        recipient: p.email,
+        patientName: `${p.firstName} ${p.lastName}`,
+        subject: `Confirmación de Turno Médico - ${ws?.name || 'Clínica'}`,
+        icsUrl: `/api/appointments/${a.id}/calendar.ics`,
+        message: `Confirmación enviada exitosamente a ${p.email}. Se adjuntó la invitación de calendario oficial.`
+      });
     }
 
     if (path === '/api/leads' && method === 'POST') {
@@ -1772,6 +1851,160 @@ async function handle(req, res) {
         audit(u, 'SETTINGS_UPDATED', 'settings', w, 'Preferencias de la clínica actualizadas.');
       });
       return json(res, 200, s);
+    }
+
+    if (path === '/api/medical-orders' && method === 'GET') {
+      const orders = all('SELECT * FROM medical_orders WHERE workspaceId=? ORDER BY createdAt DESC', w);
+      return json(res, 200, orders.map(o => ({ ...o, items: typeof o.items === 'string' ? JSON.parse(o.items) : (o.items || []) })));
+    }
+
+    if (path === '/api/medical-orders' && method === 'POST') {
+      const b = await body(req);
+      const p = patient(w, text(b.patientId, 'Paciente', 1, 100));
+      const items = Array.isArray(b.items) ? b.items : [];
+      const order = {
+        id: uid(),
+        workspaceId: w,
+        patientId: p.id,
+        doctorId: b.doctorId || u.id,
+        doctorName: text(b.doctorName || u.name, 'Profesional Médico', 1, 120),
+        recordId: optional(b.recordId, 'Evolución', 100),
+        instructions: text(b.instructions, 'Indicaciones de enfermería', 1, 5000),
+        items: JSON.stringify(items),
+        status: 'PENDING',
+        administeredBy: null,
+        administeredAt: null,
+        notes: optional(b.notes, 'Notas', 1000),
+        createdAt: now(),
+        updatedAt: now()
+      };
+      transaction(() => {
+        put('medical_orders', order);
+        audit(u, 'MEDICAL_ORDER_CREATED', 'medical_order', order.id, `Indicación médica registrada para enfermería (${items.length} insumos).`);
+      });
+      return json(res, 201, { ...order, items });
+    }
+
+    const medOrderAdministerMatch = path.match(/^\/api\/medical-orders\/([^/]+)\/administer$/);
+    if (medOrderAdministerMatch && method === 'POST') {
+      const id = medOrderAdministerMatch[1];
+      const cur = q('SELECT * FROM medical_orders WHERE workspaceId=? AND id=?', w, id);
+      if (!cur) fail(404, 'Indicación médica no encontrada.');
+      if (cur.status === 'ADMINISTERED') fail(400, 'Esta indicación médica ya fue administrada.');
+      if (cur.status === 'CANCELLED') fail(400, 'Esta indicación médica fue cancelada.');
+
+      const items = typeof cur.items === 'string' ? JSON.parse(cur.items) : (cur.items || []);
+      const p = q('SELECT firstName, lastName FROM patients WHERE id=?', cur.patientId);
+      const pName = p ? `${p.firstName} ${p.lastName}` : 'Paciente';
+
+      transaction(() => {
+        for (const item of items) {
+          if (item.inventoryId) {
+            const inv = q('SELECT * FROM inventory WHERE workspaceId=? AND id=?', w, item.inventoryId);
+            if (inv) {
+              const qtyToDiscount = Math.max(1, parseInt(item.quantity, 10) || 1);
+              const newQty = Math.max(0, inv.quantity - qtyToDiscount);
+              run('UPDATE inventory SET quantity=?, updatedAt=? WHERE workspaceId=? AND id=?', newQty, now(), w, inv.id);
+              audit(u, 'INVENTORY_DISCOUNT_NURSE', 'inventory', inv.id,
+                `Descuento de ${qtyToDiscount} ${inv.unit} de "${inv.name}" administrado a paciente ${pName} (Indicación #${id.slice(0, 8)}). Stock restante: ${newQty}.`);
+            }
+          }
+        }
+        run('UPDATE medical_orders SET status=?, administeredBy=?, administeredAt=?, updatedAt=? WHERE workspaceId=? AND id=?',
+          'ADMINISTERED', u.name, now(), now(), w, id);
+        audit(u, 'MEDICAL_ORDER_ADMINISTERED', 'medical_order', id, `Indicación administrada y stock descontado por ${u.name}.`);
+      });
+
+      return json(res, 200, { ok: true, id, status: 'ADMINISTERED', administeredBy: u.name, administeredAt: now() });
+    }
+
+    const medOrderCancelMatch = path.match(/^\/api\/medical-orders\/([^/]+)\/cancel$/);
+    if (medOrderCancelMatch && method === 'POST') {
+      const id = medOrderCancelMatch[1];
+      const cur = q('SELECT * FROM medical_orders WHERE workspaceId=? AND id=?', w, id);
+      if (!cur) fail(404, 'Indicación médica no encontrada.');
+      transaction(() => {
+        run('UPDATE medical_orders SET status=?, updatedAt=? WHERE workspaceId=? AND id=?', 'CANCELLED', now(), w, id);
+        audit(u, 'MEDICAL_ORDER_CANCELLED', 'medical_order', id, `Indicación médica cancelada.`);
+      });
+      return json(res, 200, { ok: true, id, status: 'CANCELLED' });
+    }
+
+    if (path === '/api/migration/import' && method === 'POST') {
+      const b = await body(req);
+      const rows = Array.isArray(b.rows) ? b.rows : [];
+      if (!rows.length) fail(400, 'No se proporcionaron filas para importar.');
+
+      let imported = 0, updated = 0, skipped = 0;
+      const errors = [];
+
+      transaction(() => {
+        for (const row of rows) {
+          try {
+            const rawDni = String(row.dni || row.documento || row.DNI || '').trim().replace(/\D/g, '');
+            const rawPhone = String(row.phone || row.telefono || row.celular || '').trim();
+            const cleanPhone = rawPhone ? phone(rawPhone) : `+54911${Math.floor(10000000 + Math.random() * 90000000)}`;
+            const firstName = text(row.firstName || row.nombre || row.Nombre || 'Paciente', 'Nombre', 1, 80);
+            const lastName = text(row.lastName || row.apellido || row.Apellido || 'Omnia', 'Apellido', 1, 80);
+            const email = optional(row.email || row.correo || row.Email, 'Email', 120) || '';
+            const coverage = text(row.coverage || row.obraSocial || row.prepaga || row['Obra Social'] || 'Particular', 'Cobertura', 1, 100);
+            const affiliateNumber = optional(row.affiliateNumber || row.nroAfiliado || row.afiliado, 'Nro Afiliado', 50) || '';
+            const birthDate = optional(row.birthDate || row.fechaNacimiento || row['Fecha de Nacimiento'], 'Fecha Nac.', 20) || '';
+            const cuitCuil = optional(row.cuitCuil || row.cuit || row.cuil, 'CUIT/CUIL', 20) || '';
+            const notes = optional(row.notes || row.observaciones || row.diagnostico, 'Notas', 1000) || 'Importado desde Omniasalud';
+
+            const medicalHistory = {
+              allergies: row.allergies || row.alergias || 'Sin alergias reportadas',
+              pathological: row.pathological || row.patologias || '',
+              surgical: row.surgical || row.cirugias || '',
+              medications: row.medications || row.medicacion || '',
+              familyHistory: row.familyHistory || row.heredofamiliares || '',
+              habits: row.habits || row.habitos || '',
+              updatedAt: now(),
+              updatedBy: 'Migración Omniasalud'
+            };
+
+            let existing = rawDni ? q('SELECT id FROM patients WHERE workspaceId=? AND dni=?', w, rawDni) : null;
+            if (!existing && cleanPhone) {
+              existing = q('SELECT id FROM patients WHERE workspaceId=? AND phone=?', w, cleanPhone);
+            }
+
+            if (existing) {
+              run('UPDATE patients SET firstName=?, lastName=?, coverage=?, affiliateNumber=?, birthDate=?, cuitCuil=?, medicalHistory=?, updatedAt=? WHERE workspaceId=? AND id=?',
+                firstName, lastName, coverage, affiliateNumber, birthDate, cuitCuil, JSON.stringify(medicalHistory), now(), w, existing.id);
+              updated++;
+            } else {
+              const newId = uid();
+              const pRecord = {
+                id: newId,
+                workspaceId: w,
+                firstName,
+                lastName,
+                dni: rawDni || String(Math.floor(10000000 + Math.random() * 80000000)),
+                phone: cleanPhone,
+                email,
+                coverage,
+                status: 'ACTIVE',
+                notes,
+                medicalHistory: JSON.stringify(medicalHistory),
+                birthDate,
+                cuitCuil,
+                affiliateNumber,
+                createdAt: now(),
+                updatedAt: now()
+              };
+              put('patients', pRecord);
+              imported++;
+            }
+          } catch (err) {
+            errors.push({ row, error: err.message });
+            skipped++;
+          }
+        }
+        audit(u, 'MIGRATION_OMNIA_IMPORTED', 'migration', uid(), `Importación masiva completada: ${imported} nuevos pacientes, ${updated} actualizados.`);
+      });
+
+      return json(res, 200, { ok: true, imported, updated, skipped, total: rows.length, errors });
     }
 
     if (path === '/api/copilot' && method === 'POST') {

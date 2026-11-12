@@ -1217,7 +1217,9 @@ function homeView() {
 function patientsView() {
   const search = S.patientSearch.toLowerCase();
   const p = S.data.patients.filter(p => (!S.patientStatus || p.status === S.patientStatus) && [nameOf(p), p.dni, p.phone, p.email].some(x => x.toLowerCase().includes(search)));
-  return heading('Directorio de Pacientes', 'Fichas integrales de pacientes, historial de atenciones y datos de cobertura.', btn('Exportar CSV', 'export-patients', 'download') + btn('Nuevo paciente', 'new-patient', 'plus', 'primary')) +
+  return heading('Directorio de Pacientes', 'Fichas integrales de pacientes, historial de atenciones y datos de cobertura.',
+    btn('Importar Omniasalud / CSV', 'open-omnia-importer', 'upload') + btn('Exportar CSV', 'export-patients', 'download') + btn('Nuevo paciente', 'new-patient', 'plus', 'primary')
+  ) +
   `<section class="panel">
     <div class="toolbar">
       <div class="search-field grow">
@@ -1516,10 +1518,93 @@ function scheduleView() {
   </div>`;
 }
 
+function kardexSection() {
+  const orders = S.data.medicalOrders || [];
+  const pending = orders.filter(o => o.status === 'PENDING');
+  const administered = orders.filter(o => o.status === 'ADMINISTERED');
+
+  return `<div class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+    ${stat('Indicaciones Totales', orders.length, 'activity', 'Historial de órdenes médicas')}
+    ${stat('Pendientes de Suministrar', pending.length, 'clock', `${pending.length} órdenes en sala`, pending.length > 0)}
+    ${stat('Administradas con Éxito', administered.length, 'checkcircle', 'Stock descontado automáticamente')}
+  </div>
+  <section class="panel">
+    <div class="panel-header">
+      <div>
+        <h2>Kardex de Enfermería y Administración de Insumos</h2>
+        <p class="panel-sub">Registro clínico de administración en tiempo real con descuento automático de inventario.</p>
+      </div>
+      <button class="btn primary small" data-action="new-medical-order">${icon('plus', 13)} Nueva Indicación</button>
+    </div>
+    <div class="panel-body">
+      ${orders.length ? `
+        <div style="display:flex;flex-direction:column;gap:12px">
+          ${orders.map(o => {
+            const pat = patientBy(o.patientId);
+            const isPending = o.status === 'PENDING';
+            const items = o.items || [];
+            return `
+            <div class="soap-item" style="border-left:4px solid ${isPending ? '#e69b00' : '#2b6e4e'};padding:14px;background:#fff;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
+              <div class="between" style="align-items:flex-start">
+                <div>
+                  <div class="flex" style="gap:8px;align-items:center">
+                    <strong style="font-size:14px;color:#1e4c3a">${esc(nameOf(pat))}</strong>
+                    <span class="tiny muted">DNI ${esc(pat?.dni || '—')}</span>
+                    <span class="badge ${isPending ? 'amber' : 'green'}">${isPending ? 'Pendiente' : 'Administrado'}</span>
+                  </div>
+                  <div class="tiny muted" style="margin-top:2px">
+                    Prescrito por <b>${esc(o.doctorName)}</b> · ${fmtDate(o.createdAt, true)} a las ${fmtTime(o.createdAt)} hs
+                  </div>
+                </div>
+                ${isPending ? `
+                  <div class="flex" style="gap:6px">
+                    <button class="btn small primary" data-action="administer-order" data-id="${o.id}">
+                      ${icon('checkcircle', 13)} Confirmar Administración
+                    </button>
+                    <button class="btn small ghost text-link" data-action="cancel-order" data-id="${o.id}">
+                      Cancelar
+                    </button>
+                  </div>
+                ` : `
+                  <div style="text-align:right">
+                    <span class="badge green">${icon('checkcircle', 11)} Suministrado</span>
+                    <div class="tiny muted" style="margin-top:3px">Por ${esc(o.administeredBy || 'Enfermería')} · ${fmtDate(o.administeredAt, true)}</div>
+                  </div>
+                `}
+              </div>
+
+              <div style="margin:10px 0;padding:8px 12px;background:#f8fafc;border-radius:4px;font-size:13px;line-height:1.5">
+                <b>Indicación:</b> ${esc(o.instructions)}
+                ${o.notes ? `<div class="tiny muted" style="margin-top:4px"><b>Observaciones:</b> ${esc(o.notes)}</div>` : ''}
+              </div>
+
+              ${items.length ? `
+                <div style="margin-top:8px">
+                  <span class="tiny muted" style="display:block;margin-bottom:4px">Insumos y Medicación Requerida:</span>
+                  <div class="flex" style="flex-wrap:wrap;gap:6px">
+                    ${items.map(it => `
+                      <span class="attachment-chip" style="cursor:default">
+                        ${icon('box', 12)}
+                        <b>${esc(it.name)}</b> x ${it.quantity} ${esc(it.unit || 'uds')} <small style="color:#64748b">(${esc(it.route || 'EV')})</small>
+                      </span>
+                    `).join('')}
+                  </div>
+                </div>
+              ` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+      ` : empty('Sin órdenes de enfermería', 'No hay indicaciones médicas pendientes ni registradas en esta clínica.', btn('Crear primera indicación', 'new-medical-order', 'plus', 'primary'))}
+    </div>
+  </section>`;
+}
+
 function staffView() {
   const staff = S.data.staff || [];
   const search = (S.staffSearch || '').toLowerCase();
   const roleFilter = S.staffRole || '';
+  const currentTab = S.staffTab || 'members';
+  const pendingOrders = (S.data.medicalOrders || []).filter(o => o.status === 'PENDING').length;
 
   const filtered = staff.filter(m => {
     const matchesSearch = !search || [m.name, m.email, m.specialty, m.licenseNumber].some(x => (x || '').toLowerCase().includes(search));
@@ -1531,11 +1616,20 @@ function staffView() {
   const doctorsCount = staff.filter(s => s.role === 'DOCTOR').length;
   const receptionCount = staff.filter(s => s.role === 'RECEPTIONIST').length;
   const adminCount = staff.filter(s => s.role === 'CLINIC_ADMIN').length;
+  const nurseCount = staff.filter(s => s.role === 'NURSE').length;
 
-  return heading('Equipo y Controles de Acceso', 'Gestión de personal de secretaría, equipo médico y permisos de acceso a la plataforma.',
-    btn('Nuevo miembro', 'new-staff', 'plus', 'primary')
+  return heading('Equipo, Enfermería y Controles de Acceso', 'Gestión de personal de secretaría, equipo médico, enfermería y permisos de acceso.',
+    `<div class="flex" style="gap:8px">
+      <button class="btn small" data-action="new-medical-order">${icon('activity', 13)} Nueva Indicación</button>
+      <button class="btn small primary" data-action="new-staff">${icon('plus', 13)} Nuevo Miembro</button>
+    </div>`
   ) +
-  `<div class="staff-stats">
+  `<div class="financial-tabs" style="margin-bottom:14px">
+    <button class="btn small ${currentTab === 'members' ? 'primary' : ''}" data-action="staff-tab" data-value="members">Equipo y Permisos (${staff.length})</button>
+    <button class="btn small ${currentTab === 'kardex' ? 'primary' : ''}" data-action="staff-tab" data-value="kardex">Kardex / Indicaciones a Enfermería (${pendingOrders} pendientes)</button>
+  </div>` +
+  (currentTab === 'kardex' ? kardexSection() : `
+  <div class="staff-stats">
     <div class="stat-card">
       <div class="stat-top"><span>Total Equipo</span><div class="stat-icon">${icon('users', 16)}</div></div>
       <div class="stat-number">${totalMembers}</div>
@@ -1547,14 +1641,14 @@ function staffView() {
       <div class="stat-bottom muted">Profesionales asistenciales</div>
     </div>
     <div class="stat-card">
+      <div class="stat-top"><span>Enfermería y Cuidados</span><div class="stat-icon">${icon('activity', 16)}</div></div>
+      <div class="stat-number">${nurseCount}</div>
+      <div class="stat-bottom muted">Kardex y administración</div>
+    </div>
+    <div class="stat-card">
       <div class="stat-top"><span>Secretaría y Admisión</span><div class="stat-icon">${icon('usercheck', 16)}</div></div>
       <div class="stat-number">${receptionCount}</div>
       <div class="stat-bottom muted">Gestión de turnos y caja</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-top"><span>Administración</span><div class="stat-icon">${icon('shield', 16)}</div></div>
-      <div class="stat-number">${adminCount}</div>
-      <div class="stat-bottom muted">Acceso directivo</div>
     </div>
   </div>
 
@@ -1567,6 +1661,7 @@ function staffView() {
       <select aria-label="Filtrar por rol" data-change="staff-role">
         <option value="">Todos los roles</option>
         <option value="DOCTOR" ${S.staffRole === 'DOCTOR' ? 'selected' : ''}>Médicos / Cirujanos</option>
+        <option value="NURSE" ${S.staffRole === 'NURSE' ? 'selected' : ''}>Enfermería y Cuidados</option>
         <option value="RECEPTIONIST" ${S.staffRole === 'RECEPTIONIST' ? 'selected' : ''}>Secretaría / Recepción</option>
         <option value="CLINIC_ADMIN" ${S.staffRole === 'CLINIC_ADMIN' ? 'selected' : ''}>Administradores de Clínica</option>
       </select>
@@ -1618,16 +1713,17 @@ function staffView() {
     </div>
     ` : empty('No se encontró personal registrado', 'Puedes dar de alta a secretarias, médicos y administradores haciendo clic en "Nuevo miembro".', btn('Nuevo miembro', 'new-staff', 'plus', 'primary'))}
     <div class="panel-footer">
-      <span>Controles de acceso basados en roles (RBAC) con aislamiento por clínica</span>
-      <span>${filtered.length} de ${totalMembers} miembros</span>
+      <span>Personal activo en clínica: ${filtered.length}</span>
+      <span>Controles de acceso basados en roles (RBAC) con auditoría</span>
     </div>
-  </section>`;
+  </section>`);
 }
 
 function staffForm() {
   const roles = [
-    ['RECEPTIONIST', 'Secretaría / Recepción (Gestión de turnos, pacientes, sala de espera)'],
     ['DOCTOR', 'Profesional / Médico (Agenda médica, historias clínicas, consultas)'],
+    ['NURSE', 'Enfermería / Personal Clínico (Kardex, administración de insumos y fármacos)'],
+    ['RECEPTIONIST', 'Secretaría / Recepción (Gestión de turnos, pacientes, sala de espera)'],
     ['CLINIC_ADMIN', 'Administrador de Clínica (Acceso total a la clínica)']
   ];
   const fields =
@@ -2552,32 +2648,37 @@ function consentDialog(patientId) {
   const p = patientBy(patientId);
   if (!p) return;
   const templates = {
-    PROCEDURE: {
-      title: 'Consentimiento para Procedimientos Médicos Ambulatorios e Invasivos Menores',
-      text: `Por la presente, el/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), declara haber recibido del profesional de la salud interviniente información clara, precisa y adecuada respecto del procedimiento programado.\n\nSe me han explicado satisfactoriamente los objetivos, beneficios esperados, alternativas terapéuticas disponibles y los riesgos potenciales o complicaciones habituales.\n\nEn pleno uso de mis facultades y en cumplimiento de la Ley 26.529, otorgo libre y voluntariamente mi consentimiento para la realización de la práctica clínica.`
-    },
     SURGERY: {
-      title: 'Consentimiento Informado para Intervenciones Quirúrgicas y Anestesia',
-      text: `Por el presente documento, el/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), presta su expresa conformidad para la realización de la intervención quirúrgica programada y actos anestésicos requeridos.\n\nDeclaro haber sido informado/a exhaustivamente sobre la técnica quirúrgica, los tiempos de recuperación, cuidados postoperatorios y las eventuales complicaciones inherentes a la práctica.`
+      title: 'Consentimiento para Cirugía Menor Ambulatoria y Procedimientos Quirúrgicos',
+      text: `Por la presente, el/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), manifiesta en forma libre, voluntaria y consciente haber recibido de su profesional médico tratante información detallada, clara y adecuada respecto a la práctica quirúrgica o procedimiento programado.\n\n1. OBJETIVOS Y BENEFICIOS: Se me han explicado acabadamente los propósitos diagnósticos y terapéuticos del procedimiento, así como las metas esperadas para la recuperación de mi salud.\n\n2. RIESGOS PREVISIBLES Y COMPLICACIONES: He sido advertido/a de los riesgos comunes inherentes al procedimiento (tales como dolor local, edema, hematoma, hemorragia postoperatoria menor, dehiscencia de sutura, infección de sitio quirúrgico y cicatrización anómala o hipertrófica), así como riesgos infrecuentes pero de mayor gravedad que requieran medidas complementarias.\n\n3. ALTERNATIVAS TERAPÉUTICAS: Se me han informado las opciones alternativas disponibles con sus respectivos alcances y consecuencias en caso de no realizarse la práctica.\n\n4. DERECHO A REVOCACIÓN (Ley 26.529 Art. 10): Tengo pleno conocimiento de que puedo revocar este consentimiento en cualquier momento previo a la iniciación del procedimiento sin que ello afecte mi posterior atención médica.\n\nConforme a la Ley Nacional 26.529 de Derechos del Paciente, presto mi expresa conformidad.`
     },
-    DIAGNOSTIC: {
-      title: 'Consentimiento para Prácticas Diagnósticas y Toma de Muestras / Biopsias',
-      text: `El/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), presta su conformidad para la realización de la toma de muestras biológicas y/o estudios diagnósticos complementarios indicados por el profesional médico actuante.`
+    ANESTHESIA: {
+      title: 'Consentimiento Informado para Actos de Anestesia Local y Sedación',
+      text: `El/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), declara haber sido informado/a por el equipo profesional sobre los fármacos y técnicas anestésicas a emplear (anestesia infiltrativa local / sedación consciente).\n\nHe respondido con veracidad sobre antecedentes de alergias a anestésicos locales, medicación previa y ayuno.\n\nComprendo los riesgos potenciales transitorios (mareos, hipotensión, dolor en el sitio de inyección o reacción vasovagal) y otorgo mi consentimiento para la administración de los agentes anestésicos requeridos conforme a la Ley 26.529.`
     },
-    GENERAL_TREATMENT: {
-      title: 'Consentimiento de Tratamiento Clínico y Confidencialidad de Datos de Salud',
-      text: `El/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), autoriza al equipo profesional de la clínica al tratamiento médico ambulatorio y custodia confidencial de su Historia Clínica Electrónica, conforme a la Ley 25.326 y Ley 26.529.`
+    AESTHETIC: {
+      title: 'Consentimiento para Tratamientos de Medicina Estética e Invasivos No Quirúrgicos',
+      text: `El/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), presta su conformidad para la realización del tratamiento estético/médico acordado.\n\nDeclaro haber comprendido que los resultados dependen de factores biológicos individuales, habiendo recibido indicaciones precisas sobre cuidados pre y post procedimiento (exposición solar, actividad física y pautas de alarma).\n\nConsiento la aplicación conforme a las buenas prácticas médicas y la Ley 26.529.`
+    },
+    BIOPSY: {
+      title: 'Consentimiento Informado para Toma de Biopsias y Estudios Diagnósticos Invasivos',
+      text: `El/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), consiente la extracción de muestras tisulares o biológicas para su posterior procesamiento anatomopatológico y diagnóstico citológico.\n\nSe me han comunicado las precauciones hemostáticas y cuidados de la zona intervenida conforme a la Ley 26.529.`
+    },
+    TELEHEALTH: {
+      title: 'Consentimiento para Atención Médica General, Telemedicina y Protección de Datos',
+      text: `El/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), consiente la atención médica integral y la custodia confidencial de sus datos sensibles en la Historia Clínica Electrónica de la institución, en los términos de la Ley 25.326 de Protección de Datos Personales y Ley 26.529.`
     }
   };
 
-  const initial = templates.PROCEDURE;
+  const initial = templates.SURGERY;
   formDialog('consent', 'Nuevo Consentimiento Informado Bilateral', `Paciente: ${nameOf(p)} · Ley 26.529`,
-    selectField('Tipo de Consentimiento', 'type', [
-      ['PROCEDURE', 'Procedimiento Ambulatorio / Práctica Menor'],
-      ['SURGERY', 'Intervención Quirúrgica / Cirugía Mayor'],
-      ['DIAGNOSTIC', 'Práctica Diagnóstica / Biopsias'],
-      ['GENERAL_TREATMENT', 'Tratamiento Clínico General y Confidencialidad']
-    ], 'PROCEDURE', true) +
+    selectField('Plantilla Normativa (Omniasalud / Ley 26.529)', 'type', [
+      ['SURGERY', 'Cirugía Menor Ambulatoria / Procedimiento Quirúrgico'],
+      ['ANESTHESIA', 'Actos de Anestesia Local y Sedación'],
+      ['AESTHETIC', 'Tratamiento de Medicina Estética / Láser / Invasivo'],
+      ['BIOPSY', 'Punción y Toma de Biopsias Diagnósticas'],
+      ['TELEHEALTH', 'Atención Médica General, Telemedicina y Datos (Ley 25.326)']
+    ], 'SURGERY', true) +
     selectField('Profesional interviniente', 'doctorId', (S.data?.doctors || []).map(d => [d.id, `${d.name} (${d.specialty})`]), S.doctor || S.data?.doctors?.[0]?.id, true) +
     field('Título del documento', 'title', 'text', initial.title, 'required maxlength="200"', true) +
     area('Cláusulas y Declaración Médica Legal', 'content', initial.text, 'required maxlength="10000"', false) +
@@ -2740,6 +2841,8 @@ function appointmentDetail(id) {
       ${btn('Reprogramar horario', 'reschedule', 'calendar', '', 'type="button" data-id="' + id + '"')}
       ${btn('Ver ficha del paciente', 'patient-detail', 'users', '', 'type="button" data-id="' + a.patientId + '"')}
       ${btn('Enviar Recordatorio WhatsApp', 'send-wa-reminder', 'phone', 'primary', 'type="button" data-id="' + id + '"')}
+      ${btn('Enviar Email con Invitación (.ics)', 'send-apt-email', 'mail', '', 'type="button" data-id="' + id + '"')}
+      <a href="/api/appointments/${id}/calendar.ics" class="btn small" download title="Descargar archivo de calendario oficial (.ics)">${icon('calendar', 13)} Descargar .ics</a>
     </div>`,
     'Actualizar estado', `data-id="${id}"`
   );
@@ -2799,8 +2902,14 @@ function patientDetail(id) {
     <div class="between"><h2>Historial de Turnos (${appts.length})</h2><button class="text-link" data-action="new-appointment" data-patient-id="${id}">${icon('plus', 14)} Agendar turno</button></div>
     <div style="margin-top:12px">${appts.slice(0, 5).map(a => `<div class="activity-row"><span class="activity-icon">${icon('calendar', 14)}</span><div class="grow"><p>${fmtDate(a.startAt, true)} · ${fmtTime(a.startAt)}</p><small>${esc(types[a.type])}</small></div>${badge(a.status)}</div>`).join('') || '<p class="muted text-sm">Sin turnos registrados.</p>'}</div>
     <div class="divider"></div>
-    <div class="between"><h2>Historia Clínica Electrónica (${records.length})</h2>${btn('Abrir evoluciones', 'open-patient-records', 'file', 'small', 'data-id="' + id + '"')}</div>
-    <div class="dialog-actions">${btn('Cerrar', 'close-modal')}${btn('Nuevo Presupuesto', 'new-quote', 'spark', 'small', 'data-patient-id="' + id + '"')}${btn('Registrar cobro', 'new-payment', 'wallet', 'primary', 'data-patient-id="' + id + '"')}</div>`,
+    <div class="between">
+      <h2>Historia Clínica Electrónica (${records.length})</h2>
+      <div class="flex" style="gap:6px">
+        ${btn('Indicación a Enfermería', 'new-medical-order', 'activity', 'small', 'data-patient-id="' + id + '"')}
+        ${btn('Abrir evoluciones', 'open-patient-records', 'file', 'small', 'data-id="' + id + '"')}
+      </div>
+    </div>
+    <div class="dialog-actions">${btn('Cerrar', 'close-modal')}${btn('Indicación Enfermería', 'new-medical-order', 'activity', 'small', 'data-patient-id="' + id + '"')}${btn('Nuevo Presupuesto', 'new-quote', 'spark', 'small', 'data-patient-id="' + id + '"')}${btn('Registrar cobro', 'new-payment', 'wallet', 'primary', 'data-patient-id="' + id + '"')}</div>`,
     '', 'wide'
   );
 }
@@ -3005,6 +3114,140 @@ function viewAttachmentModal(recordId, fileIdx = 0) {
     </div>`,
     '', 'wide'
   );
+}
+
+function medicalOrderDialog(patientId = null) {
+  const p = patientBy(patientId) || S.data.patients[0];
+  if (!p) {
+    toast('Debes registrar un paciente antes de emitir una indicación médica.', true);
+    return;
+  }
+  const inventory = S.data.inventory || [];
+  const doctors = S.data.doctors || [];
+
+  formDialog('medical-order', 'Nueva Indicación Médica para Enfermería',
+    `Paciente: ${nameOf(p)} · Prescripción y descuento automático de stock`,
+    `<input type="hidden" name="patientId" value="${p.id}">
+    ${selectField('Médico Prescriptor', 'doctorId', doctors.map(d => [d.id, `${d.name} (${d.specialty})`]), doctors[0]?.id, true)}
+    <div class="form-field full">
+      <label>Instrucciones y Cuidados Clínicos para Enfermería *</label>
+      <textarea name="instructions" class="input" style="height:80px" required placeholder="Ej: Colocar vía periférica en MSI. Administrar Solución Fisiológica 500ml + Ketorolac 30mg lento en 30 min. Control de TA y FC post infusión."></textarea>
+    </div>
+    <div class="form-field full">
+      <div class="between" style="margin-bottom:6px">
+        <label style="margin:0">Insumos y Medicamentos (se descuentan del stock al administrar):</label>
+        <button type="button" class="btn small" id="add-order-item-btn">${icon('plus', 12)} Agregar Insumo</button>
+      </div>
+      <div id="order-items-container" style="display:flex;flex-direction:column;gap:8px"></div>
+      <input type="hidden" name="itemsJson" id="order-items-json" value="[]">
+    </div>
+    <div class="form-field full">
+      <label>Observaciones o Pautas de Alarma (Opcional)</label>
+      <input type="text" name="notes" class="input" placeholder="Ej: Avisar ante náuseas o mareos.">
+    </div>`,
+    'Emitir Indicación a Enfermería', '', 'wide'
+  );
+
+  setTimeout(() => {
+    const container = $('#order-items-container');
+    const itemsJsonInput = $('#order-items-json');
+
+    const updateItems = () => {
+      const rows = Array.from(container.querySelectorAll('.order-item-row'));
+      const items = rows.map(r => {
+        const sel = r.querySelector('.item-inventory-select');
+        const opt = sel?.options[sel.selectedIndex];
+        return {
+          inventoryId: sel?.value || '',
+          name: opt?.dataset.name || '',
+          quantity: parseInt(r.querySelector('.item-qty')?.value, 10) || 1,
+          unit: opt?.dataset.unit || 'uds',
+          route: r.querySelector('.item-route')?.value || 'EV'
+        };
+      }).filter(x => x.inventoryId);
+      if (itemsJsonInput) itemsJsonInput.value = JSON.stringify(items);
+    };
+
+    const addRow = () => {
+      const row = document.createElement('div');
+      row.className = 'order-item-row flex';
+      row.style.gap = '8px';
+      row.style.alignItems = 'center';
+      row.innerHTML = `
+        <select class="input item-inventory-select grow" style="font-size:12px">
+          <option value="">-- Seleccionar insumo del stock clínico --</option>
+          ${inventory.map(i => `<option value="${i.id}" data-name="${esc(i.name)}" data-unit="${esc(i.unit)}">${esc(i.name)} (Stock actual: ${i.quantity} ${esc(i.unit)})</option>`).join('')}
+        </select>
+        <input type="number" class="input item-qty" value="1" min="1" max="999" style="width:70px;text-align:center" title="Cantidad">
+        <select class="input item-route" style="width:110px;font-size:12px">
+          <option value="EV">Vía EV</option>
+          <option value="IM">Vía IM</option>
+          <option value="SC">Vía SC</option>
+          <option value="VO">Vía Oral</option>
+          <option value="Tópica">Tópica</option>
+          <option value="Inhalatoria">Inhalatoria</option>
+        </select>
+        <button type="button" class="icon-btn remove-order-item" style="color:#e53e3e">${icon('close', 14)}</button>
+      `;
+      container.appendChild(row);
+      updateItems();
+    };
+
+    addRow();
+
+    $('#add-order-item-btn')?.addEventListener('click', addRow);
+    container?.addEventListener('input', updateItems);
+    container?.addEventListener('change', updateItems);
+    container?.addEventListener('click', e => {
+      if (e.target.closest('.remove-order-item')) {
+        e.target.closest('.order-item-row')?.remove();
+        updateItems();
+      }
+    });
+  }, 50);
+}
+
+function omniaImporterDialog() {
+  formDialog('omnia-importer', 'Importación Masiva de Pacientes (Omniasalud / CSV)',
+    'Transfiere el padrón de pacientes, coberturas, datos de contacto y antecedentes clínicos desde Omniasalud u otros softwares.',
+    `<div class="form-field full">
+      <div class="info-box">
+        ${icon('upload', 18)}
+        <div>
+          <strong>Formato compatible: CSV, TSV o texto separado por punto y coma (;) o comas (,)</strong><br>
+          Columnas reconocidas: <code>DNI, Nombre, Apellido, FechaNacimiento, ObraSocial, NroAfiliado, Telefono, Email, Alergias, Patologias</code>
+        </div>
+      </div>
+    </div>
+    <div class="form-field full">
+      <label>1. Cargar archivo CSV / Excel (.csv, .txt):</label>
+      <input type="file" id="omnia-file-input" accept=".csv,.txt" class="input">
+    </div>
+    <div class="form-field full">
+      <label>2. O pega directamente los datos aquí:</label>
+      <textarea id="omnia-csv-text" name="csvText" class="input" style="height:140px;font-family:monospace;font-size:12px" placeholder="DNI;Nombre;Apellido;FechaNacimiento;ObraSocial;NroAfiliado;Telefono;Email;Alergias;Patologias
+35123456;Juan;Perez;1988-04-15;OSDE;012345678;+5491144556677;juan@gmail.com;Penicilina;Hipotiroidismo
+40987654;Maria;Gomez;1996-09-22;Swiss Medical;98765432;+5491188990011;maria@gmail.com;Ninguna;Asma"></textarea>
+    </div>`,
+    'Comenzar Importación a Medical OS', '', 'wide'
+  );
+
+  setTimeout(() => {
+    const fileInput = $('#omnia-file-input');
+    const textArea = $('#omnia-csv-text');
+    if (fileInput) {
+      fileInput.addEventListener('change', e => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = evt => {
+            if (textArea) textArea.value = evt.target.result;
+          };
+          reader.readAsText(file, 'utf-8');
+        }
+      });
+    }
+  }, 50);
 }
 
 function paymentForm(patientId) {
@@ -3460,6 +3703,51 @@ document.addEventListener('click', async e => {
         toast('Presupuesto marcado como Aprobado.');
         break;
       }
+      case 'open-omnia-importer':
+        omniaImporterDialog();
+        break;
+      case 'new-medical-order':
+        medicalOrderDialog(el.dataset.patientId || S.selectedPatient);
+        break;
+      case 'staff-tab':
+        S.staffTab = el.dataset.value;
+        contentOnly();
+        break;
+      case 'administer-order': {
+        el.disabled = true;
+        try {
+          await api('/api/medical-orders/' + id + '/administer', 'POST', {});
+          await refresh();
+          contentOnly();
+          toast('Indicación médica administrada y stock de insumos descontado exitosamente.');
+        } catch (err) {
+          toast(err.message, true);
+        } finally {
+          el.disabled = false;
+        }
+        break;
+      }
+      case 'cancel-order': {
+        if (confirm('¿Confirma cancelar esta indicación médica?')) {
+          await api('/api/medical-orders/' + id + '/cancel', 'POST', {});
+          await refresh();
+          contentOnly();
+          toast('Indicación médica cancelada.');
+        }
+        break;
+      }
+      case 'send-apt-email': {
+        el.disabled = true;
+        try {
+          const res = await api('/api/appointments/' + id + '/send-email', 'POST', {});
+          toast(res.message || 'Confirmación y archivo .ics enviados por correo.');
+        } catch (err) {
+          toast(err.message, true);
+        } finally {
+          el.disabled = false;
+        }
+        break;
+      }
       case 'edit-medical-history': medicalHistoryDialog(id); break;
       case 'new-consent': consentDialog(el.dataset.patientId || S.selectedPatient); break;
       case 'print-consent': window.open('/api/consents/' + id + '/document', '_blank'); break;
@@ -3728,6 +4016,48 @@ document.addEventListener('submit', async e => {
         S.view = 'records';
         S.omniTab = 'signos-vitales';
         message = 'Signos vitales registrados en la historia clínica.';
+        break;
+      }
+      case 'medical-order': {
+        let orderItems = [];
+        try { orderItems = JSON.parse(b.itemsJson || '[]'); } catch {}
+        await api('/api/medical-orders', 'POST', {
+          patientId: b.patientId,
+          doctorId: b.doctorId,
+          instructions: b.instructions,
+          items: orderItems,
+          notes: b.notes || ''
+        });
+        S.staffTab = 'kardex';
+        S.view = 'staff';
+        message = 'Indicación médica para enfermería registrada con éxito.';
+        break;
+      }
+      case 'omnia-importer': {
+        const raw = b.csvText || '';
+        if (!raw.trim()) throw new Error('Por favor ingresa o carga datos en formato CSV.');
+        const lines = raw.trim().split('\n').map(l => l.trim()).filter(Boolean);
+        if (lines.length < 2) throw new Error('El archivo debe contener una fila de encabezados y al menos un paciente.');
+        
+        const firstLine = lines[0];
+        const delim = firstLine.includes(';') ? ';' : (firstLine.includes('\t') ? '\t' : ',');
+        const headers = firstLine.split(delim).map(h => h.trim().replace(/^["']|["']$/g, ''));
+        
+        const parsedRows = [];
+        for (let i = 1; i < lines.length; i++) {
+          const cols = lines[i].split(delim).map(c => c.trim().replace(/^["']|["']$/g, ''));
+          if (!cols.length || (cols.length === 1 && !cols[0])) continue;
+          const rowObj = {};
+          headers.forEach((h, idx) => {
+            rowObj[h] = cols[idx] || '';
+          });
+          parsedRows.push(rowObj);
+        }
+        
+        toast(`Importando ${parsedRows.length} pacientes...`);
+        const res = await api('/api/migration/import', 'POST', { rows: parsedRows });
+        message = `Importación Omniasalud finalizada: ${res.imported} nuevos pacientes dados de alta, ${res.updated} actualizados.`;
+        S.view = 'patients';
         break;
       }
       case 'appointment': case 'reschedule': {
