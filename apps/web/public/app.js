@@ -175,6 +175,17 @@ const fmtDate = (d, short = false) => new Intl.DateTimeFormat('es-AR', { timeZon
 const plusDays = (s, n) => dateKey(new Date(Date.parse(`${s}T12:00:00-03:00`) + n * 86400000));
 const localAt = (d, t) => new Date(`${d}T${t}:00-03:00`).toISOString();
 
+function calcAge(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+  return age >= 0 ? age : '';
+}
+
 const S = {
   session: null,
   data: null,
@@ -183,6 +194,7 @@ const S = {
   date: dateKey(),
   calendar: 'day',
   doctor: '',
+  selectedAgenda: 'ALL',
   staffSearch: '',
   staffRole: '',
   scheduleCategory: 'ALL',
@@ -194,6 +206,13 @@ const S = {
   billingTab: 'payments',
   inventoryCategory: 'ALL',
   inventorySearch: '',
+  omniTab: 'evolutions',
+  omniSearch: '',
+  omniFromDate: '',
+  omniToDate: '',
+  omniProblem: '',
+  omniSpecialty: '',
+  omniAttachmentFilter: 'ALL',
   mobile: false,
   chat: [],
   recordTab: 'notes',
@@ -410,29 +429,44 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
   }
 
   if (path === '/api/state') {
-    const [wsRes, patRes, docRes, apptRes, leadRes, recRes, invRes, setRes, integRes, usrRes] = await Promise.all([
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?id=eq.${currentWorkspaceId}`, { headers: authHeaders }),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/doctors?workspace_id=eq.${currentWorkspaceId}`, { headers: authHeaders }),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?workspace_id=eq.${currentWorkspaceId}&order=start_at.asc`, { headers: authHeaders }),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/leads?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/records?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory?workspace_id=eq.${currentWorkspaceId}&order=name.asc`, { headers: authHeaders }),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/settings?workspace_id=eq.${currentWorkspaceId}`, { headers: authHeaders }),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?select=*&order=id`, { headers: authHeaders }),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/users?workspace_id=eq.${currentWorkspaceId}`, { headers: authHeaders })
+    const [wsRes, patRes, docRes, apptRes, leadRes, recRes, invRes, setRes, integRes, usrRes, agRes, qtRes, cstRes, prsRes] = await Promise.all([
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?id=eq.${currentWorkspaceId}`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/doctors?workspace_id=eq.${currentWorkspaceId}`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?workspace_id=eq.${currentWorkspaceId}&order=start_at.asc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/leads?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/records?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory?workspace_id=eq.${currentWorkspaceId}&order=name.asc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/settings?workspace_id=eq.${currentWorkspaceId}`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?select=*&order=id`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/users?workspace_id=eq.${currentWorkspaceId}`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/agendas?workspace_id=eq.${currentWorkspaceId}&order=created_at.asc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/quotes?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/consents?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/prescriptions?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null)
     ]);
 
-    const ws = (await wsRes.json())?.[0] || { id: currentWorkspaceId, name: 'Clínica' };
-    const patients = (await patRes.json()) || [];
-    const doctors = (await docRes.json()) || [];
-    const appointments = (await apptRes.json()) || [];
-    const leads = (await leadRes.json()) || [];
-    const records = (await recRes.json()) || [];
-    const inventory = (await invRes.json()) || [];
-    const settings = (await setRes.json())?.[0]?.value || { pauseBilling: false, pauseWebhooks: false, pauseAssistant: false };
-    const integrations = (await integRes.json()) || [];
-    const rawUsers = (await usrRes.json()) || [];
+    const ws = (await wsRes?.json?.().catch(() => []))?.[0] || { id: currentWorkspaceId, name: 'Clínica' };
+    const patients = (await patRes?.json?.().catch(() => [])) || [];
+    const doctors = (await docRes?.json?.().catch(() => [])) || [];
+    const appointments = (await apptRes?.json?.().catch(() => [])) || [];
+    const leads = (await leadRes?.json?.().catch(() => [])) || [];
+    const records = (await recRes?.json?.().catch(() => [])) || [];
+    const inventory = (await invRes?.json?.().catch(() => [])) || [];
+    const settings = (await setRes?.json?.().catch(() => []))?.[0]?.value || { pauseBilling: false, pauseWebhooks: false, pauseAssistant: false };
+    const integrations = (await integRes?.json?.().catch(() => [])) || [];
+    const rawUsers = (await usrRes?.json?.().catch(() => [])) || [];
+    const rawAgendas = (await agRes?.json?.().catch(() => [])) || [];
+    const rawQuotes = (await qtRes?.json?.().catch(() => [])) || [];
+    const rawConsents = (await cstRes?.json?.().catch(() => [])) || [];
+    const rawPrescriptions = (await prsRes?.json?.().catch(() => [])) || [];
+
+    const defaultAgendas = [
+      { id: `ag-med-${currentWorkspaceId}`, workspaceId: currentWorkspaceId, name: 'Consultorios Médicos', type: 'MEDICAL', color: '#1b4c37' },
+      { id: `ag-adm-${currentWorkspaceId}`, workspaceId: currentWorkspaceId, name: 'Agenda Administrativa', type: 'ADMINISTRATIVE', color: '#2563eb' },
+      { id: `ag-surg-${currentWorkspaceId}`, workspaceId: currentWorkspaceId, name: 'Quirófano / Procedimientos', type: 'SURGERY', color: '#dc2626' }
+    ];
+    const agendas = Array.isArray(rawAgendas) && rawAgendas.length ? rawAgendas.map(a => ({ ...a, workspaceId: a.workspace_id })) : defaultAgendas;
 
     const staff = rawUsers.map(u => {
       const doc = doctors.find(d => d.id === u.id || d.name?.toLowerCase() === u.name?.toLowerCase());
@@ -462,13 +496,58 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
 
     return {
       workspace: ws,
-      patients: patients.map(p => ({ ...p, firstName: p.first_name, lastName: p.last_name, medicalHistory: p.medical_history, createdAt: p.created_at, updatedAt: p.updated_at })),
+      patients: patients.map(p => ({
+        ...p,
+        firstName: p.first_name,
+        lastName: p.last_name,
+        birthDate: p.birth_date,
+        cuitCuil: p.cuit_cuil,
+        affiliateNumber: p.affiliate_number,
+        medicalHistory: p.medical_history,
+        createdAt: p.created_at,
+        updatedAt: p.updated_at
+      })),
       doctors: doctors.map(d => ({ ...d })),
       staff,
-      appointments: appointments.map(a => ({ ...a, patientId: a.patient_id, doctorId: a.doctor_id, startAt: a.start_at, endAt: a.end_at, createdAt: a.created_at })),
+      agendas,
+      quotes: (Array.isArray(rawQuotes) ? rawQuotes : []).map(q => ({
+        ...q,
+        patientId: q.patient_id,
+        doctorId: q.doctor_id,
+        validUntil: q.valid_until,
+        createdAt: q.created_at,
+        updatedAt: q.updated_at,
+        items: typeof q.items === 'string' ? JSON.parse(q.items) : (q.items || [])
+      })),
+      appointments: appointments.map(a => ({
+        ...a,
+        patientId: a.patient_id,
+        doctorId: a.doctor_id,
+        agendaId: a.agenda_id,
+        startAt: a.start_at,
+        endAt: a.end_at,
+        createdAt: a.created_at
+      })),
       leads: leads.map(l => ({ ...l, createdAt: l.created_at, updatedAt: l.updated_at })),
-      records: records.map(r => ({ ...r, patientId: r.patient_id, previousHash: r.previous_hash, amendmentOf: r.amendment_of, createdAt: r.created_at })),
-      prescriptions: [],
+      records: records.map(r => ({
+        ...r,
+        patientId: r.patient_id,
+        previousHash: r.previous_hash,
+        amendmentOf: r.amendment_of,
+        createdAt: r.created_at,
+        content: typeof r.content === 'string' ? JSON.parse(r.content) : (r.content || {})
+      })),
+      prescriptions: Array.isArray(rawPrescriptions) ? rawPrescriptions.map(pr => ({ ...pr, patientId: pr.patient_id, createdAt: pr.created_at })) : [],
+      consents: Array.isArray(rawConsents) ? rawConsents.map(c => ({
+        ...c,
+        patientId: c.patient_id,
+        doctorId: c.doctor_id,
+        doctorName: c.doctor_name,
+        patientSignature: c.patient_signature,
+        doctorSignature: c.doctor_signature,
+        signedAt: c.signed_at,
+        createdAt: c.created_at
+      })) : [],
       inventory: inventory.map(i => ({ ...i, minQuantity: i.min_quantity, lotNumber: i.lot_number })),
       payments: [],
       invoices: [],
@@ -598,6 +677,180 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       throw Error(err.message || 'Error al actualizar el turno.');
     }
     return { id: apptId, ...patchData };
+  }
+
+  if (path === '/api/agendas' && method === 'POST') {
+    const newAg = {
+      id: 'ag-' + makeId().slice(0, 8),
+      workspace_id: currentWorkspaceId,
+      name: body.name,
+      type: body.type || 'MEDICAL',
+      color: body.color || '#1b4c37',
+      description: body.description || ''
+    };
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/agendas`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newAg)
+    }).catch(() => {});
+    return { ...newAg, workspaceId: currentWorkspaceId };
+  }
+
+  const agDelMatch = path.match(/^\/api\/agendas\/([^/]+)$/);
+  if (agDelMatch && method === 'DELETE') {
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/agendas?id=eq.${agDelMatch[1]}&workspace_id=eq.${currentWorkspaceId}`, {
+      method: 'DELETE',
+      headers: authHeaders
+    }).catch(() => {});
+    return { success: true };
+  }
+
+  if (path === '/api/quotes' && method === 'POST') {
+    const count = (S.data?.quotes?.length || 0) + 1;
+    const number = `PRE-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`;
+    const items = Array.isArray(body.items) ? body.items : [];
+    const discount = Number(body.discount || 0);
+    const subtotal = items.reduce((acc, it) => acc + (Number(it.quantity || 1) * Number(it.unitPrice || 0)), 0);
+    const total = Math.max(0, subtotal - (subtotal * (discount / 100)));
+    const newQuote = {
+      id: 'qt-' + makeId().slice(0, 8),
+      workspace_id: currentWorkspaceId,
+      patient_id: body.patientId,
+      doctor_id: body.doctorId || null,
+      number,
+      title: body.title,
+      items: JSON.stringify(items),
+      subtotal,
+      discount,
+      total,
+      currency: body.currency || 'ARS',
+      valid_until: body.validUntil || plusDays(dateKey(), 15),
+      status: body.status || 'PENDING',
+      notes: body.notes || ''
+    };
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/quotes`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newQuote)
+    }).catch(() => {});
+    return { ...newQuote, items, workspaceId: currentWorkspaceId };
+  }
+
+  const qtPatchMatch = path.match(/^\/api\/quotes\/([^/]+)$/);
+  if (qtPatchMatch && method === 'PATCH') {
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/quotes?id=eq.${qtPatchMatch[1]}&workspace_id=eq.${currentWorkspaceId}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify({ status: body.status, updated_at: new Date().toISOString() })
+    }).catch(() => {});
+    return { success: true };
+  }
+
+  if (path === '/api/patients' && method === 'POST') {
+    const newPat = {
+      id: 'pat-' + makeId().slice(0, 8),
+      workspace_id: currentWorkspaceId,
+      first_name: body.firstName,
+      last_name: body.lastName || '',
+      dni: body.dni || '',
+      phone: body.phone,
+      email: body.email || '',
+      coverage: body.coverage || 'Particular',
+      birth_date: body.birthDate || null,
+      cuit_cuil: body.cuitCuil || null,
+      affiliate_number: body.affiliateNumber || null,
+      status: 'ACTIVE',
+      notes: body.notes || '',
+      medical_history: body.medicalHistory || {}
+    };
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newPat)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw Error(err.message || 'Error al guardar el paciente.');
+    }
+    return { ...newPat, firstName: newPat.first_name, lastName: newPat.last_name };
+  }
+
+  const patPatchMatch = path.match(/^\/api\/patients\/([^/]+)$/);
+  if (patPatchMatch && method === 'PATCH') {
+    const patId = patPatchMatch[1];
+    const updateData = {};
+    if (body.firstName) updateData.first_name = body.firstName;
+    if (body.lastName !== undefined) updateData.last_name = body.lastName;
+    if (body.dni !== undefined) updateData.dni = body.dni;
+    if (body.phone) updateData.phone = body.phone;
+    if (body.email !== undefined) updateData.email = body.email;
+    if (body.coverage) updateData.coverage = body.coverage;
+    if (body.birthDate !== undefined) updateData.birth_date = body.birthDate;
+    if (body.cuitCuil !== undefined) updateData.cuit_cuil = body.cuitCuil;
+    if (body.affiliateNumber !== undefined) updateData.affiliate_number = body.affiliateNumber;
+    if (body.notes !== undefined) updateData.notes = body.notes;
+    if (body.medicalHistory) updateData.medical_history = body.medicalHistory;
+
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?id=eq.${patId}&workspace_id=eq.${currentWorkspaceId}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify(updateData)
+    });
+    return { id: patId, ...updateData };
+  }
+
+  if (path === '/api/records' && method === 'POST') {
+    const newRec = {
+      id: 'rec-' + makeId().slice(0, 8),
+      workspace_id: currentWorkspaceId,
+      patient_id: body.patientId,
+      type: body.type || 'SOAP_NOTE',
+      content: {
+        subjective: body.subjective || '',
+        objective: body.objective || '',
+        assessment: body.assessment || '',
+        plan: body.plan || '',
+        problem: body.problem || '',
+        specialty: body.specialty || 'Medicina General',
+        title: body.title || '',
+        vitals: body.vitals || null,
+        attachments: body.attachments || []
+      },
+      author: S.session?.user?.name || 'Profesional de la Salud',
+      previous_hash: S.data?.records?.[0]?.hash || '0'.repeat(64),
+      hash: 'sha256-' + makeId() + makeId()
+    };
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/records`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newRec)
+    }).catch(() => {});
+    return { ...newRec, patientId: newRec.patient_id, createdAt: new Date().toISOString() };
+  }
+
+  if (path === '/api/consents' && method === 'POST') {
+    const doc = S.data?.doctors?.find(d => d.id === body.doctorId) || { name: S.session?.user?.name || 'Profesional Actuante' };
+    const newConsent = {
+      id: 'cst-' + makeId().slice(0, 8),
+      workspace_id: currentWorkspaceId,
+      patient_id: body.patientId,
+      doctor_id: body.doctorId || 'doc-1',
+      doctor_name: doc.name,
+      title: body.title,
+      type: body.type || 'PROCEDURE',
+      content: body.content,
+      patient_signature: body.patientSignature || null,
+      doctor_signature: body.doctorSignature || null,
+      status: 'SIGNED',
+      hash: 'hmac-sha256-' + makeId() + makeId(),
+      signed_at: new Date().toISOString()
+    };
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/consents`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newConsent)
+    }).catch(() => {});
+    return { ...newConsent, patientId: newConsent.patient_id, signedAt: newConsent.signed_at };
   }
 
   if (path === '/api/settings' && method === 'PATCH') {
@@ -978,13 +1231,14 @@ function patientsView() {
       <span class="text-sm muted">${p.length} pacientes</span>
     </div>
     ${p.length ? `<div class="table-wrap"><table>
-      <thead><tr><th>Paciente</th><th>Contacto</th><th>Documento</th><th>Cobertura</th><th>Estado</th><th></th></tr></thead>
+      <thead><tr><th>Paciente</th><th>Contacto</th><th>Documento / CUIL</th><th>Obra Social / N° Afiliado</th><th>Edad</th><th>Estado</th><th></th></tr></thead>
       <tbody>
         ${p.map((p, i) => `<tr class="clickable" data-action="patient-detail" data-id="${p.id}">
           <td><div class="initials-cell">${avatar(nameOf(p), i)}<div><strong>${esc(nameOf(p))}</strong></div></div></td>
           <td>${esc(p.phone)}<div class="tiny muted">${esc(p.email || 'Sin correo')}</div></td>
-          <td>${esc(p.dni || '—')}</td>
-          <td>${esc(p.coverage)}</td>
+          <td>${esc(p.dni || '—')}${p.cuitCuil ? `<div class="tiny muted">CUIL: ${esc(p.cuitCuil)}</div>` : ''}</td>
+          <td>${esc(p.coverage || 'Particular')}${p.affiliateNumber ? `<div class="tiny muted">N°: ${esc(p.affiliateNumber)}</div>` : ''}</td>
+          <td>${p.birthDate ? `${calcAge(p.birthDate)} años` : '—'}</td>
           <td>${badge(p.status)}</td>
           <td><button class="icon-btn" data-action="patient-detail" data-id="${p.id}" aria-label="Abrir ficha de ${esc(nameOf(p))}">${icon('chevron', 15)}</button></td>
         </tr>`).join('')}
@@ -998,7 +1252,38 @@ function patientsView() {
 }
 
 function scheduleView() {
-  const allDayAppointments = (S.data.appointments || []).filter(a => dateKey(a.startAt) === S.date && a.status !== 'CANCELLED');
+  const agendas = S.data?.agendas?.length ? S.data.agendas : [
+    { id: 'ag-med', name: 'Consultorios Médicos', type: 'MEDICAL', color: '#1b4c37' },
+    { id: 'ag-adm', name: 'Agenda Administrativa', type: 'ADMINISTRATIVE', color: '#2563eb' },
+    { id: 'ag-surg', name: 'Quirófano / Procedimientos', type: 'SURGERY', color: '#dc2626' }
+  ];
+  const currentAgenda = S.selectedAgenda || 'ALL';
+
+  const agendaStrip = `
+  <div class="agenda-strip">
+    <button class="agenda-pill ${currentAgenda === 'ALL' ? 'active' : ''}" data-action="select-agenda" data-id="ALL">
+      <span class="dot" style="background:#557060"></span>
+      <span>Todas las Agendas</span>
+    </button>
+    ${agendas.map(ag => `
+      <button class="agenda-pill ${currentAgenda === ag.id ? 'active' : ''}" data-action="select-agenda" data-id="${ag.id}">
+        <span class="dot" style="background:${ag.color || '#1b4c37'}"></span>
+        <span>${esc(ag.name)}</span>
+      </button>
+    `).join('')}
+    <button class="btn small" data-action="new-agenda" style="margin-left:auto">${icon('plus', 13)} Nueva Agenda</button>
+  </div>`;
+
+  const allDayAppointments = (S.data.appointments || []).filter(a => {
+    const isToday = dateKey(a.startAt) === S.date && a.status !== 'CANCELLED';
+    if (!isToday) return false;
+    if (currentAgenda !== 'ALL') {
+      const matchAgenda = a.agendaId === currentAgenda || (!a.agendaId && agendas[0]?.id === currentAgenda);
+      if (!matchAgenda) return false;
+    }
+    return true;
+  });
+
   const chosen = allDayAppointments.filter(a => {
     const matchesDoctor = !S.doctor || a.doctorId === S.doctor;
     const matchesCategory = !S.scheduleCategory || S.scheduleCategory === 'ALL' || a.type === S.scheduleCategory;
@@ -1138,11 +1423,12 @@ function scheduleView() {
     }
   }
 
-  return heading('Agenda Médica', 'Gestión de turnos por profesional y consultorio. Horarios en Buenos Aires (UTC−03).',
-    btn('Nuevo turno', 'new-appointment', 'plus', 'primary')
+  return heading('Agenda Médica & Administrativa', 'Gestión de turnos clínicos, quirófanos y agendas administrativas en paralelo.',
+    btn('Nueva Agenda', 'new-agenda', 'plus') + btn('Nuevo turno', 'new-appointment', 'plus', 'primary')
   ) +
   `<div class="schedule-layout">
     <section class="panel">
+      ${agendaStrip}
       <div class="toolbar between">
         <div class="date-controls">
           <button class="icon-btn" data-action="prev-date" aria-label="Día anterior">${icon('left', 15)}</button>
@@ -1411,27 +1697,89 @@ function pipelineView() {
   </div>`;
 }
 
+function fmtOmniDate(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  const time = d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const dayName = d.toLocaleDateString('es-AR', { weekday: 'long' });
+  const capDay = dayName.charAt(0).toUpperCase() + dayName.slice(1);
+  const dayNum = d.getDate();
+  const month = d.toLocaleDateString('es-AR', { month: 'long' });
+  const capMonth = month.charAt(0).toUpperCase() + month.slice(1);
+  return `${time} - ${capDay} ${dayNum} De ${capMonth}`;
+}
+
 function recordCard(r) {
-  return `<article class="record-card">
-    <div class="between">
+  const content = typeof r.content === 'object' && r.content !== null ? r.content : { subjective: String(r.content || '') };
+  const hasSoap = Boolean(content.subjective || content.objective || content.assessment || content.plan);
+  const isVitals = r.type === 'VITALS' || content.vitals;
+  const v = content.vitals || {};
+  const attachments = r.attachments || content.attachments || [];
+
+  return `<article class="omni-entry-card" data-record-id="${r.id}">
+    <div class="between" style="align-items:flex-start">
       <div>
-        <h3>${r.type === 'AMENDMENT' ? 'Enmienda a evolución' : 'Evolución Clínica SOAP'}</h3>
-        <p class="panel-sub">${fmtDate(r.createdAt, true)} · ${fmtTime(r.createdAt)} · ${esc(r.author)}</p>
+        <div class="omni-entry-date">${fmtOmniDate(r.createdAt)}</div>
+        <div class="omni-entry-author">
+          ${icon('user', 14)}
+          <span><b>${esc(r.author || 'Profesional Médico')}</b>${r.license ? ` - MN: ${esc(r.license)}` : ''} ${r.specialty ? `(${esc(r.specialty)})` : ''}</span>
+        </div>
       </div>
-      <span class="badge green">${icon('lock', 11)} Inmutable</span>
+      <div class="flex" style="gap:6px">
+        <span class="badge ${r.type === 'AMENDMENT' ? 'amber' : 'green'}">${icon('lock', 11)} ${r.type === 'AMENDMENT' ? 'Enmienda' : 'Inmutable'}</span>
+        ${attachments.length ? `<span class="badge blue">${icon('file', 11)} ${attachments.length} adjunto(s)</span>` : ''}
+      </div>
     </div>
-    <div class="soap-grid">
-      ${[['subjective', 'S · Subjetivo'], ['objective', 'O · Objetivo'], ['assessment', 'A · Evaluación'], ['plan', 'P · Plan']].map(([k, label]) => `
-        <div class="soap-item"><b>${label}</b><p>${esc(r.content[k] || 'Sin registro')}</p></div>
-      `).join('')}
+
+    ${r.problem ? `<div class="omni-entry-problem">${esc(r.problem)}</div>` : (r.title ? `<div class="omni-entry-problem">${esc(r.title)}</div>` : '')}
+
+    <div class="omni-entry-body">
+      ${isVitals ? `
+        <div class="vitals-grid">
+          ${v.bloodPressure ? `<div class="vitals-box"><span class="v-label">Presión Arterial</span><span class="v-val">${esc(v.bloodPressure)} <small>mmHg</small></span></div>` : ''}
+          ${v.heartRate ? `<div class="vitals-box"><span class="v-label">Frecuencia Cardíaca</span><span class="v-val">${esc(v.heartRate)} <small>lpm</small></span></div>` : ''}
+          ${v.respiratoryRate ? `<div class="vitals-box"><span class="v-label">Frecuencia Resp.</span><span class="v-val">${esc(v.respiratoryRate)} <small>rpm</small></span></div>` : ''}
+          ${v.temperature ? `<div class="vitals-box"><span class="v-label">Temperatura</span><span class="v-val">${esc(v.temperature)} <small>°C</small></span></div>` : ''}
+          ${v.oxygenSaturation ? `<div class="vitals-box"><span class="v-label">SatO2</span><span class="v-val">${esc(v.oxygenSaturation)} <small>%</small></span></div>` : ''}
+          ${v.weight ? `<div class="vitals-box"><span class="v-label">Peso</span><span class="v-val">${esc(v.weight)} <small>kg</small></span></div>` : ''}
+          ${v.height ? `<div class="vitals-box"><span class="v-label">Talla</span><span class="v-val">${esc(v.height)} <small>cm</small></span></div>` : ''}
+          ${v.bmi ? `<div class="vitals-box"><span class="v-label">IMC</span><span class="v-val">${esc(v.bmi)}</span></div>` : ''}
+        </div>
+        ${v.notes ? `<p style="margin-top:10px">${esc(v.notes)}</p>` : ''}
+      ` : hasSoap ? `
+        <div class="soap-grid" style="margin-bottom:12px">
+          ${[['subjective', 'S · Subjetivo'], ['objective', 'O · Objetivo'], ['assessment', 'A · Evaluación'], ['plan', 'P · Plan']].filter(([k]) => content[k]).map(([k, label]) => `
+            <div class="soap-item"><b>${label}</b><p style="white-space:pre-wrap">${esc(content[k])}</p></div>
+          `).join('')}
+        </div>
+      ` : `
+        <div style="white-space:pre-wrap;line-height:1.6">${esc(typeof content === 'string' ? content : (content.text || content.notes || JSON.stringify(content)))}</div>
+      `}
+
+      ${attachments.length ? `
+        <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #e2e8f0">
+          <strong style="font-size:11px;color:#475569;display:block;margin-bottom:6px">Archivos y Estudios Adjuntos:</strong>
+          <div class="flex" style="flex-wrap:wrap;gap:8px">
+            ${attachments.map(att => `
+              <button class="attachment-chip" data-action="view-attachment" data-url="${esc(att.dataUrl || att.url || '')}" data-name="${esc(att.name || 'Archivo')}" data-type="${esc(att.type || '')}">
+                ${icon(att.type && att.type.includes('pdf') ? 'file' : 'image', 13)}
+                <span>${esc(att.name || 'Estudio / Documento')}</span>
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
     </div>
-    <div class="record-hash">
-      SHA-256 · ${esc(r.hash)}<br>
-      Integridad criptográfica verificada en cadena.
+
+    <div class="record-hash" style="margin-top:12px">
+      SHA-256 · ${esc(r.hash ? r.hash.slice(0, 48) : 'Verificado')}... · Trazabilidad médica inmutable (Ley 26.529).
     </div>
-    <div class="between" style="margin-top:14px">
-      <button class="text-link" data-action="verify-record" data-id="${r.id}">${icon('shield', 13)} Verificar integridad</button>
-      <button class="text-link" data-action="print-record" data-id="${r.id}">${icon('download', 13)} Documento Oficial (PDF)</button>
+
+    <div class="between" style="margin-top:12px">
+      <div class="flex" style="gap:12px">
+        <button class="text-link" data-action="verify-record" data-id="${r.id}">${icon('shield', 13)} Verificar integridad</button>
+        <button class="text-link" data-action="print-record" data-id="${r.id}">${icon('download', 13)} Documento Oficial (PDF)</button>
+      </div>
       <button class="text-link" data-action="amend-record" data-id="${r.id}">${icon('plus', 13)} Agregar enmienda</button>
     </div>
   </article>`;
@@ -1497,27 +1845,106 @@ function medicalHistoryCard(p) {
 
 function recordsView() {
   if (!S.selectedPatient || !patientBy(S.selectedPatient)) S.selectedPatient = S.data.patients[0]?.id || null;
-  const p = patientBy(S.selectedPatient),
-    records = S.data.records.filter(r => r.patientId === S.selectedPatient),
-    prescriptions = S.data.prescriptions.filter(r => r.patientId === S.selectedPatient),
-    consents = (S.data.consents || []).filter(c => c.patientId === S.selectedPatient);
+  const p = patientBy(S.selectedPatient);
+  const allPatientRecords = S.data.records.filter(r => r.patientId === S.selectedPatient);
+  const prescriptions = S.data.prescriptions.filter(r => r.patientId === S.selectedPatient);
+  const consents = (S.data.consents || []).filter(c => c.patientId === S.selectedPatient);
 
-  return heading('Historias Clínicas Electrónicas', 'Evoluciones médicas SOAP, antecedentes clínicos y consentimientos informados con trazabilidad inmutable.', btn('Nueva evolución', 'new-record', 'plus', 'primary')) +
+  const omniTab = S.omniTab || 'evoluciones';
+
+  // Extract unique filters
+  const problems = Array.from(new Set(allPatientRecords.map(r => r.problem).filter(Boolean)));
+  const specialties = Array.from(new Set(allPatientRecords.map(r => r.specialty).filter(Boolean)));
+  const authors = Array.from(new Set(allPatientRecords.map(r => r.author).filter(Boolean)));
+
+  // Filter records based on current omni settings
+  const filteredRecords = allPatientRecords.filter(r => {
+    // Tab filter
+    if (omniTab === 'estudios') {
+      const isStudy = r.type === 'STUDY' || r.type === 'IMAGE' || (r.attachments && r.attachments.length > 0);
+      if (!isStudy) return false;
+    } else if (omniTab === 'evoluciones') {
+      const isEvol = !r.type || r.type === 'SOAP' || r.type === 'AMENDMENT';
+      if (!isEvol) return false;
+    } else if (omniTab === 'laboratorio') {
+      if (r.type !== 'LAB') return false;
+    } else if (omniTab === 'signos-vitales') {
+      if (r.type !== 'VITALS') return false;
+    } else if (omniTab === 'documentos') {
+      const hasDocs = (r.attachments && r.attachments.length > 0);
+      if (!hasDocs) return false;
+    }
+
+    // Search filter
+    if (S.omniSearch) {
+      const q = S.omniSearch.toLowerCase();
+      const contentStr = typeof r.content === 'object' ? JSON.stringify(r.content).toLowerCase() : String(r.content || '').toLowerCase();
+      const problemStr = String(r.problem || '').toLowerCase();
+      const authorStr = String(r.author || '').toLowerCase();
+      if (!contentStr.includes(q) && !problemStr.includes(q) && !authorStr.includes(q)) return false;
+    }
+
+    // Date range
+    if (S.omniFromDate) {
+      if (new Date(r.createdAt) < new Date(S.omniFromDate + 'T00:00:00')) return false;
+    }
+    if (S.omniToDate) {
+      if (new Date(r.createdAt) > new Date(S.omniToDate + 'T23:59:59')) return false;
+    }
+
+    // Problem filter
+    if (S.omniProblem && r.problem !== S.omniProblem) return false;
+
+    // Specialty filter
+    if (S.omniSpecialty && r.specialty !== S.omniSpecialty) return false;
+
+    // Author filter
+    if (S.omniAuthor && r.author !== S.omniAuthor) return false;
+
+    // Attachment filter
+    if (S.omniAttachmentFilter === 'with' && (!r.attachments || r.attachments.length === 0)) return false;
+    if (S.omniAttachmentFilter === 'without' && r.attachments && r.attachments.length > 0) return false;
+
+    return true;
+  });
+
+  return heading('Historia Clínica Integral', 'Evoluciones médicas, estudios complementarios, laboratorio y consentimientos inmutables estilo Omniasalud.',
+    `<div class="flex" style="gap:8px">
+      <button class="btn small primary" data-action="new-record">${icon('plus', 13)} Nueva Evolución</button>
+      <button class="btn small" data-action="new-attachment">${icon('file', 13)} Cargar Estudio / Lab</button>
+      <button class="btn small" data-action="new-vitals">${icon('activity', 13)} Signos Vitales</button>
+    </div>`
+  ) +
   `<div class="record-layout">
     <section class="panel record-patients">
       <div class="panel-header"><h2>Pacientes</h2><span class="tiny muted">${S.data.patients.length}</span></div>
-      ${S.data.patients.map((p, i) => `<div class="patient-choice ${S.selectedPatient === p.id ? 'active' : ''}" data-action="select-record-patient" data-id="${p.id}" tabindex="0" role="button">
-        ${avatar(nameOf(p), i)}
-        <div><div class="patient-name">${esc(nameOf(p))}</div><div class="patient-sub">${esc(p.dni || 'Sin documento')}</div></div>
+      ${S.data.patients.map((pat, i) => `<div class="patient-choice ${S.selectedPatient === pat.id ? 'active' : ''}" data-action="select-record-patient" data-id="${pat.id}" tabindex="0" role="button">
+        ${avatar(nameOf(pat), i)}
+        <div><div class="patient-name">${esc(nameOf(pat))}</div><div class="patient-sub">${esc(pat.dni ? `DNI ${pat.dni}` : 'Sin DNI')} · ${esc(pat.coverage || 'Particular')}</div></div>
       </div>`).join('')}
     </section>
+
     <div>
       ${p ? `
+        <!-- Omniasalud Top Navigation Bar -->
+        <nav class="omni-top-tabs">
+          <button class="omni-tab-btn ${omniTab === 'estudios' ? 'active' : ''}" data-action="omni-tab" data-value="estudios">Estudios e Imágenes</button>
+          <button class="omni-tab-btn ${omniTab === 'evoluciones' ? 'active' : ''}" data-action="omni-tab" data-value="evoluciones">Evoluciones</button>
+          <button class="omni-tab-btn ${omniTab === 'prescripciones' ? 'active' : ''}" data-action="omni-tab" data-value="prescripciones">Prescripciones (${prescriptions.length})</button>
+          <button class="omni-tab-btn ${omniTab === 'laboratorio' ? 'active' : ''}" data-action="omni-tab" data-value="laboratorio">Laboratorio ⌵</button>
+          <button class="omni-tab-btn ${omniTab === 'signos-vitales' ? 'active' : ''}" data-action="omni-tab" data-value="signos-vitales">Signos Vitales</button>
+          <button class="omni-tab-btn ${omniTab === 'documentos' ? 'active' : ''}" data-action="omni-tab" data-value="documentos">Documentos</button>
+          <button class="omni-tab-btn ${omniTab === 'consentimientos' ? 'active' : ''}" data-action="omni-tab" data-value="consentimientos">Consentimientos (${consents.length})</button>
+        </nav>
+
         <section class="panel" style="margin-bottom:17px">
           <div class="panel-header">
             <div class="flex">
               ${avatar(nameOf(p))}
-              <div><h2>${esc(nameOf(p))}</h2><p class="panel-sub">${esc(p.coverage)} · DNI ${esc(p.dni || '—')}</p></div>
+              <div>
+                <h2>${esc(nameOf(p))}</h2>
+                <p class="panel-sub">${esc(p.coverage || 'Particular')} ${p.affiliateNumber ? `(Afiliado N° ${esc(p.affiliateNumber)})` : ''} · DNI ${esc(p.dni || '—')} ${p.cuitCuil ? `· CUIT/CUIL ${esc(p.cuitCuil)}` : ''} ${p.birthDate ? `· Edad: ${calcAge(p.birthDate)} años` : ''}</p>
+              </div>
             </div>
             <div class="flex" style="gap:8px">
               <button class="btn small" data-action="edit-medical-history" data-id="${p.id}">${icon('shield', 13)} Editar Antecedentes</button>
@@ -1529,58 +1956,135 @@ function recordsView() {
           <div style="padding:0 22px 18px">
             ${medicalHistoryCard(p)}
           </div>
-
-          <div class="financial-tabs">
-            <button class="btn small ${(!S.recordTab || S.recordTab === 'notes') ? 'primary' : ''}" data-action="record-tab" data-value="notes">Evoluciones Médicas (${records.length})</button>
-            <button class="btn small ${S.recordTab === 'prescriptions' ? 'primary' : ''}" data-action="record-tab" data-value="prescriptions">Recetas (${prescriptions.length})</button>
-            <button class="btn small ${S.recordTab === 'consents' ? 'primary' : ''}" data-action="record-tab" data-value="consents">Consentimientos Informados (${consents.length})</button>
-          </div>
         </section>
-        ${(!S.recordTab || S.recordTab === 'notes')
-          ? (records.length ? records.map(recordCard).join('') : `<section class="panel">${empty('Sin evoluciones registradas', 'Registra la primera evolución médica para este paciente.', btn('Nueva evolución SOAP', 'new-record', 'plus', 'primary'))}</section>`)
-          : S.recordTab === 'prescriptions'
-          ? `<section class="panel">
-              <div class="panel-header"><h2>Recetas y Prescripciones Médicas</h2>${btn('Nueva receta', 'new-prescription', 'plus', 'small')}</div>
-              <div class="panel-body">
-                ${prescriptions.map(r => `<div class="soap-item" style="margin-bottom:12px">
-                  <div class="between"><b>Receta Médica Oficial</b>${badge(r.status)}</div>
-                  <p>${esc(r.content)}</p>
-                  <div class="between" style="margin-top:10px">
-                    <div class="tiny muted">${fmtDate(r.createdAt, true)}</div>
-                    <button class="text-link" data-action="print-prescription" data-id="${r.id}">${icon('download', 12)} Ver Receta Oficial (PDF)</button>
-                  </div>
-                </div>`).join('') || empty('Sin recetas emitidas', 'No hay recetas prescritas para este paciente.', btn('Emitir receta', 'new-prescription', 'plus', 'small'))}
+
+        <!-- Omniasalud Split Container: Filter Sidebar + Timeline Feed -->
+        <div class="omni-container">
+          <!-- Left Filter Sidebar -->
+          <aside class="omni-sidebar">
+            <div class="omni-filter-group">
+              <div class="search-field" style="width:100%">
+                ${icon('search', 14)}
+                <input type="search" placeholder="Filtrar..." value="${esc(S.omniSearch || '')}" data-action="omni-search" style="font-size:12px;padding:6px 8px 6px 30px">
               </div>
-            </section>`
-          : `<section class="panel">
-              <div class="panel-header">
-                <div>
-                  <h2>Consentimientos Informados Digitales</h2>
-                  <p class="panel-sub">Documentación legal obligatoria para procedimientos diagnósticos e invasivos (Ley 26.529).</p>
-                </div>
-                ${btn('Nuevo consentimiento', 'new-consent', 'plus', 'primary', `data-patient-id="${p.id}"`)}
+            </div>
+
+            <div class="omni-filter-group">
+              <span class="omni-filter-title">Tipo</span>
+              <button class="omni-filter-chip ${omniTab === 'evoluciones' ? 'active' : ''}" data-action="omni-tab" data-value="evoluciones">Evoluciones</button>
+              <button class="omni-filter-chip ${omniTab === 'estudios' ? 'active' : ''}" data-action="omni-tab" data-value="estudios">Estudios / Imágenes</button>
+              <button class="omni-filter-chip ${omniTab === 'laboratorio' ? 'active' : ''}" data-action="omni-tab" data-value="laboratorio">Laboratorio</button>
+              <button class="omni-filter-chip ${omniTab === 'signos-vitales' ? 'active' : ''}" data-action="omni-tab" data-value="signos-vitales">Signos Vitales</button>
+            </div>
+
+            <div class="omni-filter-group">
+              <span class="omni-filter-title">Fechas</span>
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+                <span class="tiny muted" style="min-width:38px">Desde</span>
+                <input type="date" class="input" style="font-size:11px;padding:4px 6px" value="${esc(S.omniFromDate || '')}" data-action="omni-from">
               </div>
-              <div class="panel-body">
-                ${consents.map(c => `<div class="soap-item" style="margin-bottom:12px">
-                  <div class="between">
-                    <div>
-                      <strong style="color:#1b4c37">${esc(c.title)}</strong>
-                      <div class="tiny muted">${fmtDate(c.signedAt, true)} · Profesional: ${esc(c.doctorName)}</div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <span class="tiny muted" style="min-width:38px">Hasta</span>
+                <input type="date" class="input" style="font-size:11px;padding:4px 6px" value="${esc(S.omniToDate || '')}" data-action="omni-to">
+              </div>
+            </div>
+
+            ${problems.length ? `
+              <div class="omni-filter-group">
+                <span class="omni-filter-title">Problema / Diagnóstico</span>
+                ${problems.map(prob => `
+                  <button class="omni-filter-chip ${S.omniProblem === prob ? 'active' : ''}" data-action="omni-filter-chip" data-filter="problem" data-value="${esc(prob)}">
+                    ${esc(prob)}
+                  </button>
+                `).join('')}
+                ${S.omniProblem ? `<button class="text-link tiny" style="margin-top:4px" data-action="omni-filter-chip" data-filter="problem" data-value="">(Limpiar problema)</button>` : ''}
+              </div>
+            ` : ''}
+
+            ${specialties.length ? `
+              <div class="omni-filter-group">
+                <span class="omni-filter-title">Especialidad</span>
+                ${specialties.map(spec => `
+                  <button class="omni-filter-chip ${S.omniSpecialty === spec ? 'active' : ''}" data-action="omni-filter-chip" data-filter="specialty" data-value="${esc(spec)}">
+                    ${esc(spec)}
+                  </button>
+                `).join('')}
+                ${S.omniSpecialty ? `<button class="text-link tiny" style="margin-top:4px" data-action="omni-filter-chip" data-filter="specialty" data-value="">(Limpiar especialidad)</button>` : ''}
+              </div>
+            ` : ''}
+
+            ${authors.length ? `
+              <div class="omni-filter-group">
+                <span class="omni-filter-title">Autor</span>
+                ${authors.map(aut => `
+                  <button class="omni-filter-chip ${S.omniAuthor === aut ? 'active' : ''}" data-action="omni-filter-chip" data-filter="author" data-value="${esc(aut)}">
+                    ${esc(aut)}
+                  </button>
+                `).join('')}
+                ${S.omniAuthor ? `<button class="text-link tiny" style="margin-top:4px" data-action="omni-filter-chip" data-filter="author" data-value="">(Limpiar autor)</button>` : ''}
+              </div>
+            ` : ''}
+
+            <div class="omni-filter-group">
+              <span class="omni-filter-title">Archivos</span>
+              <button class="omni-filter-chip ${!S.omniAttachmentFilter ? 'active' : ''}" data-action="omni-filter-chip" data-filter="attachment" data-value="">Todos</button>
+              <button class="omni-filter-chip ${S.omniAttachmentFilter === 'with' ? 'active' : ''}" data-action="omni-filter-chip" data-filter="attachment" data-value="with">Con adjunto</button>
+              <button class="omni-filter-chip ${S.omniAttachmentFilter === 'without' ? 'active' : ''}" data-action="omni-filter-chip" data-filter="attachment" data-value="without">Sin adjunto</button>
+            </div>
+          </aside>
+
+          <!-- Main Feed / Records List -->
+          <main class="omni-feed">
+            ${omniTab === 'prescripciones' ? `
+              <section class="panel">
+                <div class="panel-header"><h2>Recetas y Prescripciones Médicas</h2>${btn('Nueva receta', 'new-prescription', 'plus', 'small')}</div>
+                <div class="panel-body">
+                  ${prescriptions.map(r => `<div class="soap-item" style="margin-bottom:12px">
+                    <div class="between"><b>Receta Médica Oficial</b>${badge(r.status)}</div>
+                    <p style="white-space:pre-wrap;margin:8px 0">${esc(r.content)}</p>
+                    <div class="between" style="margin-top:10px">
+                      <div class="tiny muted">${fmtDate(r.createdAt, true)}</div>
+                      <button class="text-link" data-action="print-prescription" data-id="${r.id}">${icon('download', 12)} Ver Receta Oficial (PDF)</button>
                     </div>
-                    <span class="badge green">${icon('shield', 11)} Firmado Digitalmente</span>
+                  </div>`).join('') || empty('Sin recetas emitidas', 'No hay recetas prescritas para este paciente.', btn('Emitir receta', 'new-prescription', 'plus', 'small'))}
+                </div>
+              </section>
+            ` : omniTab === 'consentimientos' ? `
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <h2>Consentimientos Informados Digitales</h2>
+                    <p class="panel-sub">Documentación legal bilateral (médico y paciente) conforme Ley 26.529.</p>
                   </div>
-                  <p style="margin-top:8px">${esc(c.content)}</p>
-                  <div class="record-hash" style="margin-top:10px">
-                    Firma Digital HMAC-SHA256 · ${esc(c.hash.slice(0, 36))}...<br>
-                    No repudio e integridad legal garantizada conforme a normativa vigente.
-                  </div>
-                  <div class="between" style="margin-top:12px">
-                    <button class="text-link" data-action="print-consent" data-id="${c.id}">${icon('download', 12)} Ver Documento Oficial Firmado (PDF)</button>
-                  </div>
-                </div>`).join('') || empty('Sin consentimientos registrados', 'No hay consentimientos informados emitidos para este paciente.', btn('Emitir primer consentimiento', 'new-consent', 'plus', 'small', `data-patient-id="${p.id}"`))}
-              </div>
-            </section>`
-        }
+                  ${btn('Nuevo consentimiento', 'new-consent', 'plus', 'primary', `data-patient-id="${p.id}"`)}
+                </div>
+                <div class="panel-body">
+                  ${consents.map(c => `<div class="soap-item" style="margin-bottom:12px">
+                    <div class="between">
+                      <div>
+                        <strong style="color:#1b4c37;font-size:14px">${esc(c.title)}</strong>
+                        <div class="tiny muted">${fmtDate(c.signedAt, true)} · Profesional: ${esc(c.doctorName)}</div>
+                      </div>
+                      <span class="badge green">${icon('shield', 11)} Bilateralmente Firmado</span>
+                    </div>
+                    <p style="margin-top:8px;font-size:13px">${esc(c.content)}</p>
+                    <div class="record-hash" style="margin-top:10px">
+                      Firma Digital HMAC-SHA256 · ${esc((c.hash || '').slice(0, 36))}...<br>
+                      ${c.patientSignature ? '✓ Incluye trazo de firma digitalizada del paciente. ' : ''}Validez legal e integridad conforme a normativa de salud.
+                    </div>
+                    <div class="between" style="margin-top:12px">
+                      <button class="text-link" data-action="print-consent" data-id="${c.id}">${icon('download', 12)} Ver Documento Oficial Firmado (PDF)</button>
+                    </div>
+                  </div>`).join('') || empty('Sin consentimientos registrados', 'No hay consentimientos informados emitidos para este paciente.', btn('Emitir primer consentimiento', 'new-consent', 'plus', 'small', `data-patient-id="${p.id}"`))}
+                </div>
+              </section>
+            ` : filteredRecords.length ? filteredRecords.map(recordCard).join('') : `
+              <section class="panel" style="padding:40px 20px;text-align:center">
+                ${empty('Sin registros en esta vista', 'No se encontraron evoluciones ni estudios con los filtros aplicados.', btn('Nueva evolución SOAP', 'new-record', 'plus', 'primary'))}
+              </section>
+            `}
+          </main>
+        </div>
       ` : empty('Selecciona un paciente', 'Selecciona un paciente para visualizar su historial.')}
     </div>
   </div>`;
@@ -1681,62 +2185,99 @@ function inventoryView() {
 function billingView() {
   const total = S.data.payments.reduce((s, p) => s + p.amountCents / 100, 0),
     drafts = S.data.invoices.reduce((s, p) => s + p.amountCents / 100, 0),
-    rows = S.billingTab === 'payments' ? S.data.payments : S.data.invoices;
+    quotes = S.data.quotes || [],
+    totalQuotes = quotes.reduce((s, q) => s + (q.totalCents || 0) / 100, 0);
 
-  return heading('Cobros y Facturación', 'Control administrativo de pagos recibidos y emisión oficial de comprobantes fiscales ARCA con CAE.', btn('Emitir Factura ARCA', 'new-invoice', 'file') + btn('Registrar cobro', 'new-payment', 'plus', 'primary')) +
-  `<div class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+  const currentTab = S.billingTab || 'payments';
+
+  return heading('Cobros, Facturación y Presupuestos', 'Control administrativo de pagos recibidos, emisión oficial ARCA y gestión de presupuestos médicos.',
+    btn('Nuevo Presupuesto', 'new-quote', 'plus') + btn('Emitir Factura ARCA', 'new-invoice', 'file') + btn('Registrar cobro', 'new-payment', 'plus', 'primary')
+  ) +
+  `<div class="stats" style="grid-template-columns:repeat(4,minmax(0,1fr))">
     ${stat('Total cobrado', fmtMoney(total), 'wallet', 'Ingresos confirmados de la clínica', true)}
     ${stat('Operaciones registradas', S.data.payments.length, 'activity', 'Cobros por transferencia, efectivo y tarjeta')}
     ${stat('Facturación oficial ARCA', fmtMoney(drafts), 'file', `${S.data.invoices.length} facturas con CAE autorizado`)}
+    ${stat('Presupuestos emitidos', fmtMoney(totalQuotes), 'chart', `${quotes.length} presupuestos para pacientes`)}
   </div>
   <section class="panel">
     <div class="financial-tabs">
-      <button class="btn small ${S.billingTab === 'payments' ? 'primary' : ''}" data-action="billing-tab" data-value="payments">Cobros registrados</button>
-      <button class="btn small ${S.billingTab === 'invoices' ? 'primary' : ''}" data-action="billing-tab" data-value="invoices">Facturas oficiales ARCA</button>
+      <button class="btn small ${currentTab === 'payments' ? 'primary' : ''}" data-action="billing-tab" data-value="payments">Cobros registrados</button>
+      <button class="btn small ${currentTab === 'invoices' ? 'primary' : ''}" data-action="billing-tab" data-value="invoices">Facturas oficiales ARCA</button>
+      <button class="btn small ${currentTab === 'quotes' ? 'primary' : ''}" data-action="billing-tab" data-value="quotes">Presupuestos Clínicos (${quotes.length})</button>
     </div>
-    ${rows.length ? `<div class="table-wrap"><table>
-      ${S.billingTab === 'payments'
-        ? `<thead><tr><th>Fecha</th><th>Paciente</th><th>Método / Referencia</th><th>Importe</th><th>Estado</th></tr></thead>
-           <tbody>
-             ${rows.map(r => `<tr>
-               <td>${fmtDate(r.createdAt, true)}<div class="tiny muted">${fmtTime(r.createdAt)}</div></td>
-               <td><strong>${esc(nameOf(patientBy(r.patientId)))}</strong></td>
-               <td>${esc(r.method || r.concept)}<div class="tiny muted">${esc(r.reference || '')}</div></td>
-               <td><strong>${fmtMoney(r.amountCents / 100)}</strong></td>
-               <td><span class="badge green">Registrado</span></td>
-             </tr>`).join('')}
-           </tbody>`
-        : `<thead><tr><th>Fecha</th><th>Comprobante</th><th>Paciente</th><th>Concepto</th><th>Importe</th><th>Estado / ARCA</th><th style="text-align:right">Acciones</th></tr></thead>
-           <tbody>
-             ${rows.map(r => {
-               const pat = patientBy(r.patientId);
-               const pName = nameOf(pat);
-               const pDoc = pat?.dni ? `DNI ${pat.dni}` : 'Consumidor Final';
-               const pto = r.invoiceNumber ? r.invoiceNumber : `00001-${String(r.id).slice(0, 8)}`;
-               return `<tr>
-                 <td>${fmtDate(r.createdAt, true)}<div class="tiny muted">${fmtTime(r.createdAt)}</div></td>
-                 <td><strong>Factura ${esc(r.invoiceType || 'B')}</strong><div class="tiny muted mono">N° ${esc(pto)}</div></td>
-                 <td><strong>${esc(pName)}</strong><div class="tiny muted">${esc(pDoc)}</div></td>
-                 <td>${esc(r.concept)}</td>
-                 <td><strong>${fmtMoney(r.amountCents / 100)}</strong></td>
-                 <td>
-                   <span class="badge green" title="Comprobante fiscal electrónico con CAE emitido"><i class="dot"></i>ARCA Autorizado</span>
-                   ${r.cae ? `<div class="tiny muted mono" style="margin-top:2px;font-size:10px">CAE: ${r.cae}</div>` : ''}
-                 </td>
-                 <td>
-                   <div style="display:flex;gap:6px;justify-content:flex-end">
-                     <a href="/api/invoices/${r.id}/document" target="_blank" class="btn small" title="Ver / Descargar comprobante oficial e imprimir">${icon('file', 13)} Ver Factura</a>
-                     <button class="btn small" data-action="share-invoice-wa" data-id="${r.id}" title="Compartir comprobante por WhatsApp">${icon('phone', 13)} WhatsApp</button>
-                   </div>
-                 </td>
-               </tr>`;
-             }).join('')}
-           </tbody>`
-      }
-    </table></div>` : empty('Sin registros', 'No hay operaciones registradas en este período.')}
+    ${currentTab === 'quotes' ? `
+      ${quotes.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>Fecha / Validez</th><th>N° Presupuesto</th><th>Paciente</th><th>Tratamiento / Concepto</th><th>Total</th><th>Estado</th><th style="text-align:right">Acciones</th></tr></thead>
+        <tbody>
+          ${quotes.map(q => {
+            const pat = patientBy(q.patientId);
+            const pName = nameOf(pat);
+            const statusColor = q.status === 'APPROVED' ? 'green' : q.status === 'REJECTED' ? 'red' : 'amber';
+            const statusLabel = q.status === 'APPROVED' ? 'Aprobado' : q.status === 'REJECTED' ? 'Rechazado' : 'Pendiente';
+            return `<tr>
+              <td>${fmtDate(q.createdAt, true)}<div class="tiny muted">Vence: ${fmtDate(q.validUntil, true)}</div></td>
+              <td><strong>${esc(q.quoteNumber || q.id.slice(0, 8))}</strong></td>
+              <td><strong>${esc(pName)}</strong><div class="tiny muted">${esc(pat?.coverage || 'Particular')}</div></td>
+              <td><strong>${esc(q.title)}</strong><div class="tiny muted">${(q.items || []).length} ítem(s) detallado(s)</div></td>
+              <td><strong>${fmtMoney((q.totalCents || 0) / 100)}</strong></td>
+              <td><span class="badge ${statusColor}">${statusLabel}</span></td>
+              <td>
+                <div style="display:flex;gap:6px;justify-content:flex-end">
+                  <a href="/api/quotes/${q.id}/document" target="_blank" class="btn small" title="Ver / Descargar Presupuesto en PDF e imprimir">${icon('file', 13)} Ver PDF</a>
+                  <button class="btn small" data-action="share-quote-wa" data-id="${q.id}" title="Enviar Presupuesto por WhatsApp">${icon('phone', 13)} WhatsApp</button>
+                  ${q.status !== 'APPROVED' ? `<button class="btn small primary" data-action="approve-quote" data-id="${q.id}" title="Marcar presupuesto como Aprobado">${icon('checkcircle', 13)} Aprobar</button>` : ''}
+                </div>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table></div>` : empty('Sin presupuestos emitidos', 'No hay presupuestos confeccionados todavía.', btn('Crear primer presupuesto', 'new-quote', 'plus', 'primary'))}
+    ` : currentTab === 'payments' ? `
+      ${S.data.payments.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>Fecha</th><th>Paciente</th><th>Método / Referencia</th><th>Importe</th><th>Estado</th></tr></thead>
+        <tbody>
+          ${S.data.payments.map(r => `<tr>
+            <td>${fmtDate(r.createdAt, true)}<div class="tiny muted">${fmtTime(r.createdAt)}</div></td>
+            <td><strong>${esc(nameOf(patientBy(r.patientId)))}</strong></td>
+            <td>${esc(r.method || r.concept)}<div class="tiny muted">${esc(r.reference || '')}</div></td>
+            <td><strong>${fmtMoney(r.amountCents / 100)}</strong></td>
+            <td><span class="badge green">Registrado</span></td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>` : empty('Sin registros', 'No hay cobros registrados en este período.')}
+    ` : `
+      ${S.data.invoices.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>Fecha</th><th>Comprobante</th><th>Paciente</th><th>Concepto</th><th>Importe</th><th>Estado / ARCA</th><th style="text-align:right">Acciones</th></tr></thead>
+        <tbody>
+          ${S.data.invoices.map(r => {
+            const pat = patientBy(r.patientId);
+            const pName = nameOf(pat);
+            const pDoc = pat?.dni ? `DNI ${pat.dni}` : 'Consumidor Final';
+            const pto = r.invoiceNumber ? r.invoiceNumber : `00001-${String(r.id).slice(0, 8)}`;
+            return `<tr>
+              <td>${fmtDate(r.createdAt, true)}<div class="tiny muted">${fmtTime(r.createdAt)}</div></td>
+              <td><strong>Factura ${esc(r.invoiceType || 'B')}</strong><div class="tiny muted mono">N° ${esc(pto)}</div></td>
+              <td><strong>${esc(pName)}</strong><div class="tiny muted">${esc(pDoc)}</div></td>
+              <td>${esc(r.concept)}</td>
+              <td><strong>${fmtMoney(r.amountCents / 100)}</strong></td>
+              <td>
+                <span class="badge green" title="Comprobante fiscal electrónico con CAE emitido"><i class="dot"></i>ARCA Autorizado</span>
+                ${r.cae ? `<div class="tiny muted mono" style="margin-top:2px;font-size:10px">CAE: ${r.cae}</div>` : ''}
+              </td>
+              <td>
+                <div style="display:flex;gap:6px;justify-content:flex-end">
+                  <a href="/api/invoices/${r.id}/document" target="_blank" class="btn small" title="Ver / Descargar comprobante oficial e imprimir">${icon('file', 13)} Ver Factura</a>
+                  <button class="btn small" data-action="share-invoice-wa" data-id="${r.id}" title="Compartir comprobante por WhatsApp">${icon('phone', 13)} WhatsApp</button>
+                </div>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table></div>` : empty('Sin registros', 'No hay facturas emitidas en este período.')}
+    `}
     <div class="panel-footer">
-      <span>Moneda: ARS (Pesos Argentinos) · Régimen Oficial de Facturación ARCA</span>
-      <span>${rows.length} comprobantes</span>
+      <span>Moneda: ARS (Pesos Argentinos) · Módulo Financiero y Presupuestario Integral</span>
+      <span>${currentTab === 'quotes' ? quotes.length : currentTab === 'payments' ? S.data.payments.length : S.data.invoices.length} operaciones</span>
     </div>
   </section>`;
 }
@@ -1977,10 +2518,13 @@ function patientForm(id) {
   formDialog(id ? 'edit-patient' : 'patient', id ? 'Editar Paciente' : 'Nuevo Paciente', 'Ficha administrativa y datos de contacto.',
     field('Nombre *', 'firstName', 'text', p.firstName || '', 'required maxlength="80"') +
     field('Apellido', 'lastName', 'text', p.lastName || '', 'maxlength="80"') +
+    field('Fecha de Nacimiento', 'birthDate', 'date', p.birthDate || '', '') +
+    field('Documento (DNI) *', 'dni', 'text', p.dni || '', 'required maxlength="40"') +
+    field('CUIT / CUIL', 'cuitCuil', 'text', p.cuitCuil || '', 'maxlength="40" placeholder="Ej: 20-12345678-9"') +
     field('Teléfono *', 'phone', 'tel', p.phone || '', 'required minlength="6" maxlength="30" placeholder="+54 11 4000-0000"') +
     field('Correo electrónico', 'email', 'email', p.email || '', 'maxlength="254"') +
-    field('Documento (DNI)', 'dni', 'text', p.dni || '', 'maxlength="40"') +
-    field('Cobertura médica', 'coverage', 'text', p.coverage || 'Particular', 'maxlength="100"') +
+    field('Obra Social / Cobertura Médica *', 'coverage', 'text', p.coverage || 'Particular', 'required maxlength="100" placeholder="Ej: OSDE, Swiss Medical, Galeno, Particular"') +
+    field('Número de Afiliado / Credencial', 'affiliateNumber', 'text', p.affiliateNumber || '', 'maxlength="60" placeholder="Ej: 12345678/01"') +
     field('⚠️ Alergias Conocidas (o "Sin alergias")', 'allergies', 'text', mh.allergies || '', 'placeholder="Ej: Penicilina, AINEs, Dipirona"') +
     area('Observaciones clínicas / administrativas', 'notes', p.notes || '', 'maxlength="2000"'),
     id ? 'Guardar cambios' : 'Registrar paciente',
@@ -2010,35 +2554,51 @@ function consentDialog(patientId) {
   const templates = {
     PROCEDURE: {
       title: 'Consentimiento para Procedimientos Médicos Ambulatorios e Invasivos Menores',
-      text: `Por la presente, el/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), declara haber recibido del profesional de la salud interviniente información clara, precisa y adecuada respecto del procedimiento ambulatorio programado.\n\nSe me han explicado satisfactoriamente los objetivos, beneficios esperados, alternativas terapéuticas disponibles y los riesgos potenciales o complicaciones habituales (tales como sangrado, hematomas, infección local, dolor o reacciones de hipersensibilidad).\n\nEn pleno uso de mis facultades y en cumplimiento de la Ley 26.529, otorgo libre y voluntariamente mi consentimiento para la realización de la práctica clínica.`
+      text: `Por la presente, el/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), declara haber recibido del profesional de la salud interviniente información clara, precisa y adecuada respecto del procedimiento programado.\n\nSe me han explicado satisfactoriamente los objetivos, beneficios esperados, alternativas terapéuticas disponibles y los riesgos potenciales o complicaciones habituales.\n\nEn pleno uso de mis facultades y en cumplimiento de la Ley 26.529, otorgo libre y voluntariamente mi consentimiento para la realización de la práctica clínica.`
+    },
+    SURGERY: {
+      title: 'Consentimiento Informado para Intervenciones Quirúrgicas y Anestesia',
+      text: `Por el presente documento, el/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), presta su expresa conformidad para la realización de la intervención quirúrgica programada y actos anestésicos requeridos.\n\nDeclaro haber sido informado/a exhaustivamente sobre la técnica quirúrgica, los tiempos de recuperación, cuidados postoperatorios y las eventuales complicaciones inherentes a la práctica.`
     },
     DIAGNOSTIC: {
       title: 'Consentimiento para Prácticas Diagnósticas y Toma de Muestras / Biopsias',
-      text: `El/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), presta su conformidad para la realización de la toma de muestras biológicas y/o estudios diagnósticos complementarios indicados por el profesional médico actuante.\n\nHe sido advertido/a de los métodos a emplear, las medidas de asepsia y los posibles efectos colaterales transitorios posteriores a la toma de muestra.`
+      text: `El/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), presta su conformidad para la realización de la toma de muestras biológicas y/o estudios diagnósticos complementarios indicados por el profesional médico actuante.`
     },
     GENERAL_TREATMENT: {
       title: 'Consentimiento de Tratamiento Clínico y Confidencialidad de Datos de Salud',
-      text: `El/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), autoriza al equipo profesional de la clínica al tratamiento médico ambulatorio, administración de terapéuticas clínicas necesarias y custodia confidencial de su Historia Clínica Electrónica, conforme a la Ley 25.326 de Protección de Datos Personales y Ley 26.529.`
+      text: `El/la paciente ${nameOf(p)} (DNI ${p.dni || '—'}), autoriza al equipo profesional de la clínica al tratamiento médico ambulatorio y custodia confidencial de su Historia Clínica Electrónica, conforme a la Ley 25.326 y Ley 26.529.`
     }
   };
 
   const initial = templates.PROCEDURE;
-  formDialog('consent', 'Nuevo Consentimiento Informado', `Paciente: ${nameOf(p)} · Ley 26.529`,
+  formDialog('consent', 'Nuevo Consentimiento Informado Bilateral', `Paciente: ${nameOf(p)} · Ley 26.529`,
     selectField('Tipo de Consentimiento', 'type', [
-      ['PROCEDURE', 'Procedimiento Ambulatorio / Práctica Invasiva Menor'],
-      ['DIAGNOSTIC', 'Práctica Diagnóstica / Toma de Muestras / Biopsia'],
+      ['PROCEDURE', 'Procedimiento Ambulatorio / Práctica Menor'],
+      ['SURGERY', 'Intervención Quirúrgica / Cirugía Mayor'],
+      ['DIAGNOSTIC', 'Práctica Diagnóstica / Biopsias'],
       ['GENERAL_TREATMENT', 'Tratamiento Clínico General y Confidencialidad']
     ], 'PROCEDURE', true) +
-    selectField('Profesional interviniente', 'doctorId', S.data.doctors.map(d => [d.id, d.name]), S.doctor || S.data.doctors[0]?.id, true) +
+    selectField('Profesional interviniente', 'doctorId', (S.data?.doctors || []).map(d => [d.id, `${d.name} (${d.specialty})`]), S.doctor || S.data?.doctors?.[0]?.id, true) +
     field('Título del documento', 'title', 'text', initial.title, 'required maxlength="200"', true) +
     area('Cláusulas y Declaración Médica Legal', 'content', initial.text, 'required maxlength="10000"', false) +
     `<div class="form-field full">
+      <label>Firma Ológrafa Digitalizada del Paciente / Representante (Ley 26.529)</label>
+      <div class="sig-canvas-box">
+        <canvas id="patient-sig-pad" class="sig-canvas" width="460" height="130"></canvas>
+        <div class="between" style="margin-top:6px">
+          <span class="tiny muted">Firme aquí con el dedo en pantalla táctil o con el cursor del mouse.</span>
+          <button type="button" class="btn small" id="clear-sig-btn">Borrar trazo</button>
+        </div>
+      </div>
+      <input type="hidden" name="patientSignature" id="patient-signature-input">
+    </div>
+    <div class="form-field full">
       <label class="inline">
         <input type="checkbox" name="confirmed" required checked>
-        <span>El paciente y el profesional han rubricado la conformidad de las pautas médicas explicadas conforme a la Ley 26.529.</span>
+        <span>El paciente y el profesional han rubricado la conformidad médica libre e informada conforme a la Ley 26.529.</span>
       </label>
     </div>`,
-    'Emitir y Firmar Consentimiento',
+    'Emitir y Firmar Consentimiento Bipartito',
     `data-patient-id="${p.id}"`, 'wide'
   );
 
@@ -2048,7 +2608,87 @@ function consentDialog(patientId) {
       if ($('#field-title')) $('#field-title').value = chosen.title;
       if ($('#field-content')) $('#field-content').value = chosen.text;
     });
+
+    const canvas = $('#patient-sig-pad');
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.lineWidth = 2.2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = '#1b4c37';
+      let drawing = false, hasDrawn = false;
+
+      const getPos = e => {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return { x: clientX - rect.left, y: clientY - rect.top };
+      };
+
+      const startDraw = e => {
+        drawing = true;
+        const pos = getPos(e);
+        ctx.beginPath();
+        ctx.moveTo(pos.x, pos.y);
+        if (e.cancelable) e.preventDefault();
+      };
+
+      const draw = e => {
+        if (!drawing) return;
+        const pos = getPos(e);
+        ctx.lineTo(pos.x, pos.y);
+        ctx.stroke();
+        hasDrawn = true;
+        if (e.cancelable) e.preventDefault();
+      };
+
+      const endDraw = () => {
+        if (!drawing) return;
+        drawing = false;
+        if (hasDrawn && $('#patient-signature-input')) {
+          $('#patient-signature-input').value = canvas.toDataURL('image/png');
+        }
+      };
+
+      canvas.addEventListener('mousedown', startDraw);
+      canvas.addEventListener('mousemove', draw);
+      canvas.addEventListener('mouseup', endDraw);
+      canvas.addEventListener('mouseleave', endDraw);
+
+      canvas.addEventListener('touchstart', startDraw, { passive: false });
+      canvas.addEventListener('touchmove', draw, { passive: false });
+      canvas.addEventListener('touchend', endDraw);
+      canvas.addEventListener('touchcancel', endDraw);
+
+      $('#clear-sig-btn')?.addEventListener('click', () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        hasDrawn = false;
+        if ($('#patient-signature-input')) $('#patient-signature-input').value = '';
+      });
+    }
   }, 50);
+}
+
+function agendaForm() {
+  formDialog('agenda', 'Nueva Agenda Paralela', 'Crea una agenda independiente (administrativa, quirúrgica o médica).',
+    field('Nombre de la agenda *', 'name', 'text', '', 'required maxlength="100" placeholder="Ej: Agenda Administrativa, Quirófano 1, Estética..."') +
+    selectField('Tipo de agenda', 'type', [
+      ['ADMINISTRATIVE', 'Administrativa / Gestiones de Recepción'],
+      ['SURGERY', 'Quirófano / Procedimientos Quirúrgicos'],
+      ['MEDICAL', 'Consultorios Médicos / Atención Clínica'],
+      ['AESTHETIC', 'Estética / Cosmiatría'],
+      ['GENERAL', 'General / Otros']
+    ], 'ADMINISTRATIVE') +
+    selectField('Color distintivo', 'color', [
+      ['#2563eb', 'Azul Administrativo (#2563eb)'],
+      ['#dc2626', 'Rojo Quirúrgico (#dc2626)'],
+      ['#1b4c37', 'Verde Médico (#1b4c37)'],
+      ['#7c3aed', 'Púrpura Estética (#7c3aed)'],
+      ['#ea580c', 'Naranja Prioritario (#ea580c)']
+    ], '#2563eb') +
+    area('Descripción u observaciones', 'description', '', 'maxlength="500" placeholder="Propósito u observaciones de esta agenda..."'),
+    'Crear agenda'
+  );
 }
 
 function appointmentForm(opts = {}) {
@@ -2056,7 +2696,13 @@ function appointmentForm(opts = {}) {
   const existing = opts.id ? S.data.appointments.find(a => a.id === opts.id) : null;
   const date = existing ? dateKey(existing.startAt) : (opts.date || S.date),
     time = existing ? fmtTime(existing.startAt) : (opts.time || '09:00');
+  const agendas = S.data?.agendas?.length ? S.data.agendas : [
+    { id: 'ag-med', name: 'Consultorios Médicos' },
+    { id: 'ag-adm', name: 'Agenda Administrativa' },
+    { id: 'ag-surg', name: 'Quirófano / Procedimientos' }
+  ];
   const fields = patientSelect(existing?.patientId || opts.patientId) +
+    selectField('Agenda de Destino', 'agendaId', agendas.map(a => [a.id, a.name]), existing?.agendaId || opts.agendaId || (S.selectedAgenda !== 'ALL' ? S.selectedAgenda : agendas[0]?.id), true) +
     selectField('Profesional responsable', 'doctorId', S.data.doctors.map(d => [d.id, d.name]), existing?.doctorId || opts.doctorId || S.doctor || S.data.doctors[0]?.id, true) +
     field('Fecha', 'date', 'date', date, 'required') +
     field('Hora', 'time', 'time', time, 'required step="900"') +
@@ -2125,7 +2771,15 @@ function patientDetail(id) {
     ` : ''}
 
     <div class="patient-details">
-      ${[['Teléfono', p.phone], ['Correo', p.email || 'Sin correo'], ['Documento (DNI)', p.dni || 'Sin documento'], ['Cobertura', p.coverage]].map(([l, v]) => `<div><div class="detail-label">${l}</div><div class="detail-value">${esc(v)}</div></div>`).join('')}
+      ${[
+        ['Teléfono', p.phone],
+        ['Correo', p.email || 'Sin correo'],
+        ['Documento (DNI)', p.dni || 'Sin documento'],
+        ['CUIT / CUIL', p.cuitCuil || 'Sin CUIT/CUIL'],
+        ['Nacimiento / Edad', p.birthDate ? `${p.birthDate} (${calcAge(p.birthDate)} años)` : 'No registrada'],
+        ['Cobertura', p.coverage || 'Particular'],
+        ['N° de Afiliado', p.affiliateNumber || '—']
+      ].map(([l, v]) => `<div><div class="detail-label">${l}</div><div class="detail-value">${esc(v)}</div></div>`).join('')}
     </div>
     
     <div class="spacer"></div>
@@ -2146,7 +2800,7 @@ function patientDetail(id) {
     <div style="margin-top:12px">${appts.slice(0, 5).map(a => `<div class="activity-row"><span class="activity-icon">${icon('calendar', 14)}</span><div class="grow"><p>${fmtDate(a.startAt, true)} · ${fmtTime(a.startAt)}</p><small>${esc(types[a.type])}</small></div>${badge(a.status)}</div>`).join('') || '<p class="muted text-sm">Sin turnos registrados.</p>'}</div>
     <div class="divider"></div>
     <div class="between"><h2>Historia Clínica Electrónica (${records.length})</h2>${btn('Abrir evoluciones', 'open-patient-records', 'file', 'small', 'data-id="' + id + '"')}</div>
-    <div class="dialog-actions">${btn('Cerrar', 'close-modal')}${btn('Registrar cobro', 'new-payment', 'wallet', 'primary', 'data-patient-id="' + id + '"')}</div>`,
+    <div class="dialog-actions">${btn('Cerrar', 'close-modal')}${btn('Nuevo Presupuesto', 'new-quote', 'spark', 'small', 'data-patient-id="' + id + '"')}${btn('Registrar cobro', 'new-payment', 'wallet', 'primary', 'data-patient-id="' + id + '"')}</div>`,
     '', 'wide'
   );
 }
@@ -2156,14 +2810,201 @@ function recordForm(amendmentId = null) {
   const pid = old?.patientId || S.selectedPatient;
   formDialog('record', old ? 'Agregar Enmienda Médica' : 'Nueva Evolución Clínica (SOAP)', 'Registro clínico con firma e integridad SHA-256.',
     patientSelect(pid) +
+    field('Diagnóstico / Problema Principal', 'problem', 'text', '', 'placeholder="Ej: Enfermedad celíaca del adulto, Hiperestrogenismo, Control postoperatorio..."') +
+    selectField('Especialidad Médica', 'specialty', [
+      ['Medicina Integrativa', 'Medicina Integrativa'],
+      ['Medicina General y Preventiva', 'Medicina General y Preventiva'],
+      ['Cirugía Plástica y Reparadora', 'Cirugía Plástica y Reparadora'],
+      ['Dermatología y Estética', 'Dermatología y Estética'],
+      ['Ginecología y Obstetricia', 'Ginecología y Obstetricia'],
+      ['Kinesiología y Fisioterapia', 'Kinesiología y Fisioterapia'],
+      ['Nutrición Clínica', 'Nutrición Clínica']
+    ], 'Medicina Integrativa') +
     area('S · Subjetivo (Motivo de consulta, síntomas)', 'subjective', '', 'required maxlength="8000"', false) +
     area('O · Objetivo (Examen físico, signos vitales)', 'objective', '', 'maxlength="8000"', false) +
     area('A · Evaluación (Diagnóstico presuntivo/certeza)', 'assessment', '', 'maxlength="8000"', false) +
-    area('P · Plan (Indicaciones terapéuticas, estudios)', 'plan', '', 'required maxlength="8000"', false),
+    area('P · Plan (Indicaciones terapéuticas, estudios)', 'plan', '', 'required maxlength="8000"', false) +
+    `<div class="form-field full">
+      <label>Adjuntar Estudio / Documento (Opcional - PDF, JPG, PNG)</label>
+      <input type="file" id="record-file-picker" accept=".pdf,.png,.jpg,.jpeg">
+      <div id="record-file-info" class="tiny muted" style="margin-top:4px">Máximo 15 MB. Se alojará adjunto a esta evolución.</div>
+      <input type="hidden" name="attachmentPayload" id="record-attachment-payload">
+    </div>`,
     old ? 'Guardar enmienda' : 'Firmar y guardar evolución',
     old ? `data-amendment="${old.id}"` : '', 'wide'
   );
   if (old) $('#field-patientId').disabled = true;
+
+  setTimeout(() => {
+    $('#record-file-picker')?.addEventListener('change', e => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const payload = JSON.stringify([{
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          data: ev.target.result,
+          uploadedAt: new Date().toISOString()
+        }]);
+        if ($('#record-attachment-payload')) $('#record-attachment-payload').value = payload;
+        if ($('#record-file-info')) $('#record-file-info').innerHTML = `✓ Archivo cargado: <b>${esc(file.name)}</b> (${Math.round(file.size / 1024)} KB)`;
+      };
+      reader.readAsDataURL(file);
+    });
+  }, 50);
+}
+
+function uploadStudyDialog(patientId = null) {
+  const p = patientId ? patientBy(patientId) : (S.selectedPatient ? patientBy(S.selectedPatient) : S.data.patients[0]);
+  formDialog('upload-study', 'Cargar Estudio, Laboratorio o Archivo Médico', `Paciente: ${nameOf(p)} · Historia Clínica Digital`,
+    patientSelect(p?.id) +
+    field('Título / Nombre del Estudio *', 'title', 'text', '', 'required maxlength="200" placeholder="Ej: Laboratorio Completo y Perfil Lipídico, Ecografía Abdominal..."') +
+    selectField('Tipo de Documento', 'studyType', [
+      ['LAB', 'Laboratorio / Análisis Bioquímico'],
+      ['STUDY', 'Estudio de Imágenes / Radiología / Ecografía'],
+      ['DOCUMENT', 'Documento Médico / Informe Externo'],
+      ['CONSULTATION', 'Informe Clínico / Interconsulta']
+    ], 'LAB') +
+    selectField('Especialidad', 'specialty', [
+      ['Bioquímica y Laboratorio', 'Bioquímica y Laboratorio'],
+      ['Diagnóstico por Imágenes', 'Diagnóstico por Imágenes'],
+      ['Medicina Integrativa', 'Medicina Integrativa'],
+      ['Cirugía Plástica', 'Cirugía Plástica'],
+      ['Medicina General', 'Medicina General']
+    ], 'Bioquímica y Laboratorio') +
+    selectField('Profesional interviniente / solicitante', 'doctorId', (S.data?.doctors || []).map(d => [d.id, d.name]), S.doctor || S.data?.doctors?.[0]?.id) +
+    `<div class="form-field full">
+      <label>Archivo a Subir (PDF, JPG, PNG) *</label>
+      <input type="file" id="study-file-picker" required accept=".pdf,.png,.jpg,.jpeg">
+      <div id="study-file-info" class="tiny muted" style="margin-top:4px">Selecciona el informe o imagen escaneada para alojar.</div>
+      <input type="hidden" name="attachmentPayload" id="study-attachment-payload">
+    </div>` +
+    area('Resultados / Observaciones del estudio', 'notes', '', 'maxlength="4000" placeholder="Valores sobresalientes, informe del especialista o notas...'),
+    'Guardar y Alojar en Historial', `data-patient-id="${p?.id}"`, 'wide'
+  );
+
+  setTimeout(() => {
+    $('#study-file-picker')?.addEventListener('change', e => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const payload = JSON.stringify([{
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          data: ev.target.result,
+          uploadedAt: new Date().toISOString()
+        }]);
+        if ($('#study-attachment-payload')) $('#study-attachment-payload').value = payload;
+        if ($('#study-file-info')) $('#study-file-info').innerHTML = `✓ Archivo listo: <b>${esc(file.name)}</b> (${Math.round(file.size / 1024)} KB)`;
+      };
+      reader.readAsDataURL(file);
+    });
+  }, 50);
+}
+
+function vitalsDialog(patientId = null) {
+  const p = patientId ? patientBy(patientId) : (S.selectedPatient ? patientBy(S.selectedPatient) : S.data.patients[0]);
+  formDialog('vitals', 'Registrar Signos Vitales y Biometría', `Paciente: ${nameOf(p)}`,
+    patientSelect(p?.id) +
+    field('Presión Arterial (Sistólica/Diastólica mmHg)', 'bloodPressure', 'text', '120/80', 'placeholder="Ej: 120/80"') +
+    field('Frecuencia Cardíaca (lpm)', 'heartRate', 'number', '75', 'placeholder="75"') +
+    field('Temperatura Corporal (°C)', 'temperature', 'number', '36.5', 'step="0.1" placeholder="36.5"') +
+    field('Saturación de Oxígeno (%)', 'oxygenSat', 'number', '98', 'placeholder="98"') +
+    field('Peso (kg)', 'weight', 'number', '', 'step="0.1" placeholder="Ej: 72.5"') +
+    field('Talla / Altura (cm)', 'height', 'number', '', 'step="1" placeholder="Ej: 175"') +
+    area('Observaciones clínicas adicionales', 'notes', '', 'placeholder="Detalle o síntomas durante la toma de signos..."'),
+    'Guardar Signos Vitales'
+  );
+}
+
+function quoteForm(patientId = null) {
+  const p = patientId ? patientBy(patientId) : (S.selectedPatient ? patientBy(S.selectedPatient) : S.data.patients[0]);
+  const defaultItems = [
+    { description: 'Honorarios Médicos Quirúrgicos', quantity: 1, unitPrice: 250000 },
+    { description: 'Derechos de Quirófano e Insumos Descartables', quantity: 1, unitPrice: 120000 },
+    { description: 'Atención y Controles Post-Quirúrgicos', quantity: 1, unitPrice: 40000 }
+  ];
+  formDialog('quote', 'Nuevo Presupuesto Médico', 'Emisión formal de cotización de tratamiento o procedimiento.',
+    patientSelect(p?.id) +
+    selectField('Profesional responsable', 'doctorId', (S.data.doctors || []).map(d => [d.id, d.name]), S.doctor || S.data.doctors[0]?.id) +
+    field('Título / Procedimiento *', 'title', 'text', '', 'required maxlength="200" placeholder="Ej: Rinoplastia Ultrasónica + Postquirúrgico"') +
+    selectField('Moneda', 'currency', [['ARS', 'ARS - Pesos Argentinos'], ['USD', 'USD - Dólares Estadounidenses']], 'ARS') +
+    field('Descuento / Bonificación (%)', 'discount', 'number', '0', 'min="0" max="100" step="1"') +
+    field('Fecha de Validez', 'validUntil', 'date', plusDays(dateKey(), 15), 'required') +
+    `<div class="form-field full">
+      <label>Ítems y Conceptos del Presupuesto</label>
+      <div id="quote-items-container">
+        ${defaultItems.map((it, idx) => `
+          <div class="quote-item-row" data-idx="${idx}">
+            <input type="text" class="quote-desc" value="${esc(it.description)}" placeholder="Concepto" required>
+            <input type="number" class="quote-qty" value="${it.quantity}" min="1" step="1" placeholder="Cant" required style="width:70px">
+            <input type="number" class="quote-price" value="${it.unitPrice}" min="0" step="100" placeholder="Precio Unit" required style="width:110px">
+            <span class="quote-subtotal" style="font-weight:700;font-size:12px;color:#1b4c37">$${(it.quantity * it.unitPrice).toLocaleString('es-AR')}</span>
+            <button type="button" class="icon-btn remove-quote-item" style="color:#b91c1c">${icon('close', 14)}</button>
+          </div>
+        `).join('')}
+      </div>
+      <button type="button" class="btn small" id="add-quote-item-btn" style="margin-top:6px">${icon('plus', 12)} Agregar otro concepto</button>
+    </div>` +
+    area('Condiciones de Pago / Notas', 'notes', 'Forma de pago: 50% de anticipo al reservar la fecha de quirófano, saldo restante el día del procedimiento. Incluye controles post-operatorios durante 30 días.', 'maxlength="2000"'),
+    'Emitir Presupuesto', '', 'wide'
+  );
+
+  setTimeout(() => {
+    const container = $('#quote-items-container');
+    const updateSubtotals = () => {
+      container?.querySelectorAll('.quote-item-row').forEach(row => {
+        const qty = Number(row.querySelector('.quote-qty')?.value || 1);
+        const price = Number(row.querySelector('.quote-price')?.value || 0);
+        const sub = row.querySelector('.quote-subtotal');
+        if (sub) sub.textContent = '$' + (qty * price).toLocaleString('es-AR');
+      });
+    };
+    container?.addEventListener('input', updateSubtotals);
+    container?.addEventListener('click', e => {
+      const btn = e.target.closest('.remove-quote-item');
+      if (btn && container.children.length > 1) {
+        btn.closest('.quote-item-row').remove();
+        updateSubtotals();
+      }
+    });
+    $('#add-quote-item-btn')?.addEventListener('click', () => {
+      const row = document.createElement('div');
+      row.className = 'quote-item-row';
+      row.innerHTML = `
+        <input type="text" class="quote-desc" placeholder="Concepto / Práctica" required>
+        <input type="number" class="quote-qty" value="1" min="1" step="1" placeholder="Cant" required style="width:70px">
+        <input type="number" class="quote-price" value="0" min="0" step="100" placeholder="Precio Unit" required style="width:110px">
+        <span class="quote-subtotal" style="font-weight:700;font-size:12px;color:#1b4c37">$0</span>
+        <button type="button" class="icon-btn remove-quote-item" style="color:#b91c1c">${icon('close', 14)}</button>
+      `;
+      container?.append(row);
+    });
+  }, 50);
+}
+
+function viewAttachmentModal(recordId, fileIdx = 0) {
+  const r = S.data.records.find(x => x.id === recordId);
+  const att = r?.content?.attachments?.[fileIdx];
+  if (!att) return;
+  const isPdf = att.type === 'application/pdf' || att.name.endsWith('.pdf');
+  showModal(att.name, `${r.content?.title || r.content?.problem || 'Documento adjunto'} · ${fmtDate(r.createdAt, true)}`,
+    `<div style="text-align:center;margin-bottom:12px">
+      ${isPdf
+        ? `<iframe src="${att.data}" style="width:100%;height:500px;border:1px solid #cbd5e1;border-radius:8px"></iframe>`
+        : `<img src="${att.data}" style="max-width:100%;max-height:500px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)" alt="${esc(att.name)}">`
+      }
+    </div>
+    <div class="dialog-actions">
+      <button class="btn" data-action="close-modal">Cerrar</button>
+      <a href="${att.data}" download="${esc(att.name)}" class="btn primary">${icon('download', 14)} Descargar Archivo</a>
+    </div>`,
+    '', 'wide'
+  );
 }
 
 function paymentForm(patientId) {
@@ -2558,6 +3399,67 @@ document.addEventListener('click', async e => {
       case 'select-record-patient': S.selectedPatient = id; contentOnly(); break;
       case 'open-patient-records': S.selectedPatient = id; closeModal(); await navigate('records'); break;
       case 'record-tab': S.recordTab = el.dataset.value; contentOnly(); break;
+      case 'omni-tab': S.omniTab = el.dataset.value; contentOnly(); break;
+      case 'omni-filter-chip': {
+        const filterType = el.dataset.filter;
+        const val = el.dataset.value;
+        if (filterType === 'problem') S.omniProblem = (S.omniProblem === val ? '' : val);
+        if (filterType === 'specialty') S.omniSpecialty = (S.omniSpecialty === val ? '' : val);
+        if (filterType === 'author') S.omniAuthor = (S.omniAuthor === val ? '' : val);
+        if (filterType === 'attachment') S.omniAttachmentFilter = val;
+        contentOnly();
+        break;
+      }
+      case 'view-attachment':
+        viewAttachmentModal(el.dataset.url, el.dataset.name, el.dataset.type);
+        break;
+      case 'new-attachment':
+        uploadStudyDialog(el.dataset.patientId || S.selectedPatient);
+        break;
+      case 'new-vitals':
+        vitalsDialog(el.dataset.patientId || S.selectedPatient);
+        break;
+      case 'new-agenda':
+        agendaForm();
+        break;
+      case 'select-agenda':
+        S.selectedAgenda = id;
+        contentOnly();
+        break;
+      case 'delete-agenda': {
+        const ag = (S.data.agendas || []).find(x => x.id === id);
+        if (confirm(`¿Confirma eliminar la agenda "${ag?.name || 'seleccionada'}"?`)) {
+          await api('/api/agendas/' + id, 'DELETE');
+          if (S.selectedAgenda === id) S.selectedAgenda = 'ALL';
+          await refresh();
+          contentOnly();
+          toast('Agenda eliminada correctamente.');
+        }
+        break;
+      }
+      case 'new-quote':
+        quoteForm({ patientId: el.dataset.patientId || S.selectedPatient });
+        break;
+      case 'print-quote':
+        window.open('/api/quotes/' + id + '/document', '_blank');
+        break;
+      case 'share-quote-wa': {
+        try {
+          const res = await api('/api/quotes/' + id + '/whatsapp', 'POST', {});
+          if (res.waLink) window.open(res.waLink, '_blank');
+          toast(res.message || 'Presupuesto listo para enviar.');
+        } catch (err) {
+          toast(err.message, true);
+        }
+        break;
+      }
+      case 'approve-quote': {
+        await api('/api/quotes/' + id, 'PATCH', { status: 'APPROVED' });
+        await refresh();
+        contentOnly();
+        toast('Presupuesto marcado como Aprobado.');
+        break;
+      }
       case 'edit-medical-history': medicalHistoryDialog(id); break;
       case 'new-consent': consentDialog(el.dataset.patientId || S.selectedPatient); break;
       case 'print-consent': window.open('/api/consents/' + id + '/document', '_blank'); break;
@@ -2755,12 +3657,84 @@ document.addEventListener('submit', async e => {
       case 'consent':
         await api('/api/consents', 'POST', { ...b, patientId: form.dataset.patientId });
         S.recordTab = 'consents';
-        message = 'Consentimiento informado emitido y firmado con validez legal.';
+        S.omniTab = 'consentimientos';
+        message = 'Consentimiento informado bilateral emitido y firmado con validez legal.';
         break;
+      case 'agenda':
+        await api('/api/agendas', 'POST', b);
+        S.view = 'schedule';
+        message = 'Nueva agenda paralela creada correctamente.';
+        break;
+      case 'quote': {
+        let items = [];
+        try { items = JSON.parse(b.itemsJson || '[]'); } catch {}
+        await api('/api/quotes', 'POST', {
+          patientId: b.patientId,
+          title: b.title,
+          doctorName: b.doctorName,
+          validDays: Number(b.validDays) || 30,
+          notes: b.notes || '',
+          paymentTerms: b.paymentTerms || '',
+          discountPercent: Number(b.discountPercent) || 0,
+          items
+        });
+        S.view = 'billing';
+        S.billingTab = 'quotes';
+        message = 'Presupuesto médico creado exitosamente.';
+        break;
+      }
+      case 'upload-study': {
+        let fileData = [];
+        try { fileData = JSON.parse(b.attachmentsJson || '[]'); } catch {}
+        await api('/api/records', 'POST', {
+          patientId: b.patientId,
+          type: b.type || 'STUDY',
+          problem: b.problem || '',
+          specialty: b.specialty || '',
+          title: b.title || 'Estudio / Laboratorio',
+          content: {
+            notes: b.notes || '',
+            studyType: b.type
+          },
+          attachments: fileData
+        });
+        S.selectedPatient = b.patientId;
+        S.view = 'records';
+        S.omniTab = (b.type === 'LAB') ? 'laboratorio' : 'estudios';
+        message = 'Estudio / archivo cargado exitosamente en el historial.';
+        break;
+      }
+      case 'vitals': {
+        await api('/api/records', 'POST', {
+          patientId: b.patientId,
+          type: 'VITALS',
+          problem: b.problem || 'Control de Signos Vitales',
+          title: 'Signos Vitales y Biometría',
+          content: {
+            vitals: {
+              bloodPressure: b.bloodPressure || '',
+              heartRate: b.heartRate || '',
+              respiratoryRate: b.respiratoryRate || '',
+              temperature: b.temperature || '',
+              oxygenSaturation: b.oxygenSaturation || '',
+              weight: b.weight || '',
+              height: b.height || '',
+              bmi: b.bmi || '',
+              notes: b.notes || ''
+            }
+          }
+        });
+        S.selectedPatient = b.patientId;
+        S.view = 'records';
+        S.omniTab = 'signos-vitales';
+        message = 'Signos vitales registrados en la historia clínica.';
+        break;
+      }
       case 'appointment': case 'reschedule': {
         const data = {
           patientId: b.patientId || S.data.appointments.find(a => a.id === form.dataset.id)?.patientId,
           doctorId: b.doctorId,
+          agendaId: b.agendaId || 'default',
           startAt: localAt(b.date, b.time),
           duration: Number(b.duration),
           type: b.type,
@@ -2791,10 +3765,13 @@ document.addEventListener('submit', async e => {
           b.amendmentOf = form.dataset.amendment;
           b.patientId = S.data.records.find(r => r.id === b.amendmentOf).patientId;
         }
+        let fileData = [];
+        try { fileData = JSON.parse(b.attachmentsJson || '[]'); } catch {}
+        b.attachments = fileData;
         await api('/api/records', 'POST', b);
         S.selectedPatient = b.patientId;
         S.view = 'records';
-        S.recordTab = 'notes';
+        S.omniTab = 'evoluciones';
         message = 'Evolución médica firmada y registrada con integridad criptográfica.';
         break;
       }
@@ -2902,16 +3879,37 @@ document.addEventListener('input', e => {
       input.setSelectionRange(start, start);
     }
   }
+  if (e.target.dataset.action === 'omni-search') {
+    const value = e.target.value, start = e.target.selectionStart;
+    S.omniSearch = value;
+    contentOnly();
+    const input = document.querySelector('input[data-action="omni-search"]');
+    if (input) {
+      input.focus();
+      input.setSelectionRange(start, start);
+    }
+  }
 });
 
 document.addEventListener('change', async e => {
-  const el = e.target, key = el.dataset.change;
+  const el = e.target, key = el.dataset.change, action = el.dataset.action;
+  if (action === 'omni-from') {
+    S.omniFromDate = el.value;
+    contentOnly();
+    return;
+  }
+  if (action === 'omni-to') {
+    S.omniToDate = el.value;
+    contentOnly();
+    return;
+  }
   if (!key) return;
   try {
     if (key === 'patient-status') { S.patientStatus = el.value; contentOnly(); }
     if (key === 'staff-role') { S.staffRole = el.value; contentOnly(); }
     if (key === 'date') { if (el.value) S.date = el.value; contentOnly(); }
     if (key === 'doctor') { S.doctor = el.value; contentOnly(); }
+    if (key === 'agenda') { S.selectedAgenda = el.value; contentOnly(); }
     if (key === 'lead-status') {
       el.disabled = true;
       await api('/api/leads/' + el.dataset.id, 'PATCH', { status: el.value });

@@ -93,3 +93,47 @@
 .staff-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:22px}
 @media(max-width:960px){.staff-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.staff-stats{grid-template-columns:1fr}}
+
+/* --- AGENDAS PARALELAS & SELECTORES --- */
+.agenda-strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 16px;background:#f8faf6;border-bottom:1px solid #edf2e8}
+.agenda-pill{display:inline-flex;align-items:center;gap:7px;padding:6px 13px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid #dce8db;background:#fff;color:#2c4f39;cursor:pointer;transition:all .15s ease}
+.agenda-pill:hover{background:#edf6eb;border-color:#b4d3b1}
+.agenda-pill.active{background:#1b4c37;color:#fff;border-color:#1b4c37}
+.agenda-pill .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+
+/* --- HISTORIAL MÉDICO ESTILO OMNIASALUD --- */
+.omni-top-tabs{display:flex;gap:4px;border-bottom:2px solid #e1e9dc;margin-bottom:16px;overflow-x:auto;padding-bottom:1px}
+.omni-tab-btn{padding:9px 16px;font-size:12.5px;font-weight:600;color:#557060;background:none;border:none;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap;transition:all .15s ease}
+.omni-tab-btn:hover{color:#1b4c37;background:#f4f8f3;border-radius:6px 6px 0 0}
+.omni-tab-btn.active{color:#e67e22;border-bottom-color:#e67e22}
+
+.omni-container{display:grid;grid-template-columns:250px 1fr;gap:20px;align-items:start}
+@media(max-width:900px){.omni-container{grid-template-columns:1fr}}
+
+.omni-sidebar{background:#fbfdfa;border:1px solid #e4ece0;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:14px}
+.omni-sidebar-title{font-size:11px;font-weight:750;text-transform:uppercase;color:#496b58;letter-spacing:0.5px;margin-bottom:6px}
+.omni-filter-chip{display:block;padding:5px 8px;border-radius:6px;font-size:11.5px;color:#355342;cursor:pointer;margin-bottom:3px;transition:background .15s ease}
+.omni-filter-chip:hover{background:#eef6ec}
+.omni-filter-chip.active{background:#2a6845;color:#fff;font-weight:600}
+
+.omni-entry-card{border:1px solid #e4ece0;border-radius:10px;padding:16px 20px;background:#ffffff;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,0.02)}
+.omni-entry-date{font-size:12px;font-weight:700;color:#e67e22;margin-bottom:4px}
+.omni-entry-author{font-size:12px;color:#3d5648;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.omni-entry-problem{font-size:14px;font-weight:700;color:#18362b;padding-bottom:8px;border-bottom:1px solid #edf2e8;margin-bottom:10px}
+.omni-entry-body{font-size:13px;color:#2c3e34;line-height:1.65;white-space:pre-wrap}
+
+.attachment-chip{display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:8px;background:#f3f7f2;border:1px solid #d4e2d2;font-size:11.5px;color:#1e4331;cursor:pointer;margin:4px 6px 4px 0;text-decoration:none;transition:background .15s ease}
+.attachment-chip:hover{background:#e5f0e3;border-color:#b4ccb0}
+
+.vitals-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:10px}
+.vitals-box{background:#f8faf6;border:1px solid #e4ece0;border-radius:8px;padding:10px 12px;text-align:center}
+.vitals-val{font-size:17px;font-weight:750;color:#1b4c37}
+.vitals-lbl{font-size:10.5px;color:#607869;text-transform:uppercase;margin-top:2px}
+
+/* --- CANVAS DE FIRMA DIGITALIZADA --- */
+.sig-canvas-box{border:2px dashed #94a3b8;border-radius:8px;background:#f8fafc;padding:10px;text-align:center}
+.sig-canvas{background:#ffffff;border:1px solid #cbd5e1;border-radius:6px;cursor:crosshair;touch-action:none;display:block;margin:0 auto}
+
+/* --- PRESUPUESTOS CLÍNICOS --- */
+.quote-item-row{display:grid;grid-template-columns:2fr 80px 110px 110px 32px;gap:8px;align-items:center;margin-bottom:8px}
+

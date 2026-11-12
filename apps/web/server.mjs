@@ -65,10 +65,18 @@ CREATE TABLE IF NOT EXISTS inventory(
   updatedAt TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS audit(id TEXT PRIMARY KEY,workspaceId TEXT REFERENCES workspaces(id),actor TEXT NOT NULL,action TEXT NOT NULL,entity TEXT NOT NULL,entityId TEXT NOT NULL,createdAt TEXT NOT NULL,details TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS agendas(id TEXT PRIMARY KEY,workspaceId TEXT NOT NULL REFERENCES workspaces(id),name TEXT NOT NULL,type TEXT NOT NULL DEFAULT 'MEDICAL',color TEXT NOT NULL DEFAULT '#1b4c37',description TEXT,createdAt TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS quotes(id TEXT PRIMARY KEY,workspaceId TEXT NOT NULL REFERENCES workspaces(id),patientId TEXT NOT NULL,doctorId TEXT,number TEXT NOT NULL,title TEXT NOT NULL,items TEXT NOT NULL DEFAULT '[]',subtotal REAL NOT NULL DEFAULT 0,discount REAL NOT NULL DEFAULT 0,total REAL NOT NULL DEFAULT 0,currency TEXT NOT NULL DEFAULT 'ARS',validUntil TEXT,status TEXT NOT NULL DEFAULT 'PENDING',notes TEXT,createdAt TEXT NOT NULL,updatedAt TEXT NOT NULL,FOREIGN KEY(workspaceId,patientId) REFERENCES patients(workspaceId,id));
 `);
 
 try { db.exec('ALTER TABLE leads ADD COLUMN aiTriage TEXT'); } catch {}
 try { db.exec('ALTER TABLE patients ADD COLUMN medicalHistory TEXT'); } catch {}
+try { db.exec('ALTER TABLE patients ADD COLUMN birthDate TEXT'); } catch {}
+try { db.exec('ALTER TABLE patients ADD COLUMN cuitCuil TEXT'); } catch {}
+try { db.exec('ALTER TABLE patients ADD COLUMN affiliateNumber TEXT'); } catch {}
+try { db.exec('ALTER TABLE appointments ADD COLUMN agendaId TEXT'); } catch {}
+try { db.exec('ALTER TABLE consents ADD COLUMN patientSignature TEXT'); } catch {}
+try { db.exec('ALTER TABLE consents ADD COLUMN doctorSignature TEXT'); } catch {}
 try { db.exec('ALTER TABLE invoices ADD COLUMN invoiceType TEXT DEFAULT "B"'); } catch {}
 try { db.exec('ALTER TABLE invoices ADD COLUMN invoiceNumber TEXT'); } catch {}
 try { db.exec('ALTER TABLE invoices ADD COLUMN docType TEXT DEFAULT "96"'); } catch {}
@@ -339,7 +347,8 @@ function appointmentInput(w, b) {
   if (!Number.isInteger(d) || d < 15 || d > 180 || d % 15) fail(400, 'Duración: 15 a 180 minutos, en intervalos de 15.');
   const startAt = new Date(raw).toISOString(), endAt = new Date(Date.parse(raw) + d * 60000).toISOString();
   const type = choose(b.type || 'CONSULTATION', ['CONSULTATION', 'FOLLOW_UP', 'PROCEDURE', 'SURGERY'], 'Tipo de turno');
-  return { patientId: p.id, doctorId, startAt, endAt, duration: d, type, notes: optional(b.notes, 'Notas', 2000) };
+  const agendaId = optional(b.agendaId, 'Agenda', 100);
+  return { patientId: p.id, doctorId, startAt, endAt, duration: d, type, notes: optional(b.notes, 'Notas', 2000), agendaId: agendaId || null };
 }
 
 function triageLead(lead, doctors = []) {
@@ -599,9 +608,120 @@ async function handle(req, res) {
       content: c.content,
       dateIso: c.signedAt,
       signatureDigest: c.hash,
-      verifyUrl: `http://${host}/verify/${c.id}`
+      verifyUrl: `http://${host}/verify/${c.id}`,
+      patientSignature: c.patientSignature,
+      doctorSignature: c.doctorSignature,
+      isConsent: true
     });
     return html(res, 200, docHtml);
+  }
+
+  if (path.startsWith('/api/quotes/') && path.endsWith('/document') && method === 'GET') {
+    const id = path.slice('/api/quotes/'.length, -'/document'.length);
+    const qt = q('SELECT * FROM quotes WHERE id=?', id);
+    if (!qt) fail(404, 'Presupuesto no encontrado.');
+    const p = q('SELECT * FROM patients WHERE id=?', qt.patientId);
+    const w = q('SELECT * FROM workspaces WHERE id=?', qt.workspaceId);
+    const doc = qt.doctorId ? q('SELECT * FROM doctors WHERE id=?', qt.doctorId) : null;
+    const items = typeof qt.items === 'string' ? JSON.parse(qt.items) : (qt.items || []);
+
+    const docHtml = `<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Presupuesto ${qt.number} - ${p?.firstName || 'Paciente'} ${p?.lastName || ''}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1a2f26; margin: 0; padding: 40px; background: #fff; line-height: 1.6; }
+    .header { border-bottom: 2px solid #1b4c37; padding-bottom: 18px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: flex-start; }
+    .logo { font-size: 24px; font-weight: bold; color: #1b4b3b; }
+    .logo span { color: #8bb36f; }
+    .clinic-sub { font-size: 13px; color: #62776d; margin-top: 4px; }
+    .doc-type { text-align: right; }
+    .doc-type h1 { margin: 0; font-size: 20px; color: #1b4c37; }
+    .doc-type small { font-size: 12px; color: #6d8479; }
+    .patient-banner { background: #f4f8f4; border: 1px solid #dce8db; border-radius: 8px; padding: 16px 20px; margin-bottom: 25px; display: grid; grid-template-columns: 2fr 1fr; gap: 15px; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
+    th { text-align: left; padding: 10px 14px; background: #eef5f0; color: #1b4c37; font-size: 13px; border-bottom: 2px solid #cbd5e1; }
+    td { padding: 12px 14px; border-bottom: 1px solid #e2e8f0; font-size: 13px; }
+    .total-box { margin-left: auto; width: 280px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; margin-bottom: 30px; }
+    .total-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
+    .total-row.final { font-size: 18px; font-weight: bold; color: #1b4c37; border-top: 2px solid #1b4c37; padding-top: 8px; margin-top: 8px; }
+    .notes-box { background: #fffbeb; border: 1px solid #fef3c7; border-radius: 8px; padding: 14px; font-size: 12px; color: #92400e; margin-bottom: 30px; }
+    .footer { border-top: 1px solid #e2e8f0; padding-top: 15px; font-size: 11px; color: #94a3b8; display: flex; justify-content: space-between; }
+    @media print { body { padding: 15px; } .no-print { display: none; } }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="margin-bottom: 20px; text-align: right;">
+    <button onclick="window.print()" style="padding: 9px 18px; background: #1b4c37; color: #fff; border: 0; border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer;">Imprimir / Guardar como PDF</button>
+  </div>
+  <div class="header">
+    <div>
+      <div class="logo">${w?.name || 'Abundance Clinic OS'}<span>.</span></div>
+      <div class="clinic-sub">Presupuesto y Plan Quirúrgico / Terapéutico</div>
+    </div>
+    <div class="doc-type">
+      <h1>PRESUPUESTO MÉDICO</h1>
+      <small>N° ${qt.number} · Válido hasta: ${qt.validUntil || 'A convenir'}</small>
+    </div>
+  </div>
+  <div class="patient-banner">
+    <div>
+      <div><b>Paciente:</b> ${p?.firstName || '—'} ${p?.lastName || ''}</div>
+      <div><b>Documento:</b> DNI ${p?.dni || '—'} ${p?.cuitCuil ? `· CUIL/CUIT: ${p.cuitCuil}` : ''}</div>
+      <div><b>Cobertura:</b> ${p?.coverage || 'Particular'} ${p?.affiliateNumber ? `(Afiliado N° ${p.affiliateNumber})` : ''}</div>
+    </div>
+    <div>
+      <div><b>Procedimiento:</b> ${qt.title}</div>
+      <div><b>Profesional:</b> ${doc?.name || 'Equipo Profesional'}</div>
+      <div><b>Fecha emisión:</b> ${new Date(qt.createdAt).toLocaleDateString('es-AR')}</div>
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Concepto / Ítem</th>
+        <th style="text-align:center">Cant.</th>
+        <th style="text-align:right">Precio Unitario</th>
+        <th style="text-align:right">Subtotal</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${items.map(it => `
+        <tr>
+          <td><b>${it.description || 'Ítem de tratamiento'}</b></td>
+          <td style="text-align:center">${it.quantity || 1}</td>
+          <td style="text-align:right">${qt.currency} $${Number(it.unitPrice || 0).toLocaleString('es-AR')}</td>
+          <td style="text-align:right"><b>${qt.currency} $${(Number(it.quantity || 1) * Number(it.unitPrice || 0)).toLocaleString('es-AR')}</b></td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+  <div class="total-box">
+    <div class="total-row"><span>Subtotal:</span><span>${qt.currency} $${Number(qt.subtotal).toLocaleString('es-AR')}</span></div>
+    ${Number(qt.discount) > 0 ? `<div class="total-row" style="color:#b91c1c"><span>Bonificación (${qt.discount}%):</span><span>-${qt.currency} $${(Number(qt.subtotal) * Number(qt.discount) / 100).toLocaleString('es-AR')}</span></div>` : ''}
+    <div class="total-row final"><span>Total Final:</span><span>${qt.currency} $${Number(qt.total).toLocaleString('es-AR')}</span></div>
+  </div>
+  ${qt.notes ? `<div class="notes-box"><b>Condiciones y Notas:</b><br>${qt.notes}</div>` : ''}
+  <div class="footer">
+    <span>Validez del presupuesto sujeta a disponibilidad de turnos o quirófano.</span>
+    <span>${w?.name || 'Abundance Clinic OS'} · Documento informativo</span>
+  </div>
+</body>
+</html>`;
+    return html(res, 200, docHtml);
+  }
+
+  if (path.startsWith('/api/quotes/') && path.endsWith('/whatsapp') && method === 'POST') {
+    const id = path.slice('/api/quotes/'.length, -'/whatsapp'.length);
+    const qt = q('SELECT * FROM quotes WHERE id=?', id);
+    if (!qt) fail(404, 'Presupuesto no encontrado.');
+    const p = q('SELECT * FROM patients WHERE id=?', qt.patientId);
+    const w = q('SELECT * FROM workspaces WHERE id=?', qt.workspaceId);
+    const phoneClean = (p?.phone || '').replace(/\D/g, '');
+    const textMsg = `Hola ${p?.firstName || 'estimado/a'}! Desde *${w?.name || 'la clínica'}* te compartimos el presupuesto para tu tratamiento:\n\n📋 *${qt.title}*\n🔢 Presupuesto: *${qt.number}*\n💰 Total: *${qt.currency} $${Number(qt.total).toLocaleString('es-AR')}*\n📅 Válido hasta: *${qt.validUntil}*\n\nPodés consultarnos cualquier duda para coordinar tu fecha. ¡Saludos!`;
+    const waLink = phoneClean ? `https://wa.me/${phoneClean}?text=${encodeURIComponent(textMsg)}` : '';
+    return json(res, 200, { success: true, waLink, message: 'Presupuesto preparado para enviar por WhatsApp.' });
   }
 
   if (path.startsWith('/api/invoices/') && path.endsWith('/document') && method === 'GET') {
@@ -879,7 +999,23 @@ async function handle(req, res) {
     // ==========================================
     clinicUser(u, w);
 
+    function ensureAgendas(workspaceId) {
+      try {
+        const existing = all('SELECT id FROM agendas WHERE workspaceId=?', workspaceId);
+        if (existing.length === 0) {
+          const nowIso = now();
+          run('INSERT INTO agendas(id, workspaceId, name, type, color, description, createdAt) VALUES (?,?,?,?,?,?,?)',
+            `ag-med-${workspaceId}`, workspaceId, 'Consultorios Médicos', 'MEDICAL', '#1b4c37', 'Agenda general de consultorios y atención médica.', nowIso);
+          run('INSERT INTO agendas(id, workspaceId, name, type, color, description, createdAt) VALUES (?,?,?,?,?,?,?)',
+            `ag-adm-${workspaceId}`, workspaceId, 'Agenda Administrativa', 'ADMINISTRATIVE', '#2563eb', 'Gestiones administrativas, coordinación, auditoría y trámites.', nowIso);
+          run('INSERT INTO agendas(id, workspaceId, name, type, color, description, createdAt) VALUES (?,?,?,?,?,?,?)',
+            `ag-surg-${workspaceId}`, workspaceId, 'Quirófano / Procedimientos', 'SURGERY', '#dc2626', 'Bloque quirúrgico y procedimientos invasivos.', nowIso);
+        }
+      } catch (e) {}
+    }
+
     if (path === '/api/state' && method === 'GET') {
+      ensureAgendas(w);
       const rows = table => all(`SELECT * FROM ${table} WHERE workspaceId=? ORDER BY rowid DESC`, w);
       const integrations = all('SELECT id, name, category, initials, description, status FROM integrations ORDER BY id');
       return json(res, 200, {
@@ -894,6 +1030,8 @@ async function handle(req, res) {
           specialty: (all('SELECT id, specialty FROM doctors WHERE workspaceId=?', w).find(d => d.id === su.id)?.specialty) || (su.role === 'RECEPTIONIST' ? 'Recepción y Turnos' : (su.role === 'DOCTOR' ? 'Medicina General' : 'Administración'))
         })),
         appointments: rows('appointments'),
+        agendas: rows('agendas'),
+        quotes: rows('quotes').map(q => ({ ...q, items: typeof q.items === 'string' ? JSON.parse(q.items) : (q.items || []) })),
         leads: rows('leads').map(l => ({ ...l, aiTriage: l.aiTriage ? (typeof l.aiTriage === 'string' ? JSON.parse(l.aiTriage) : l.aiTriage) : null })),
         records: rows('records').map(r => ({ ...r, content: JSON.parse(r.content) })),
         prescriptions: rows('prescriptions'),
@@ -944,6 +1082,93 @@ async function handle(req, res) {
       run('DELETE FROM users WHERE workspaceId=? AND id=?', w, staffId);
       run('DELETE FROM doctors WHERE workspaceId=? AND id=?', w, staffId);
       audit(u, 'STAFF_MEMBER_DELETED', 'user', staffId, 'Miembro del personal eliminado.');
+      return json(res, 200, { success: true });
+    }
+
+    if (path === '/api/agendas' && method === 'GET') {
+      ensureAgendas(w);
+      return json(res, 200, all('SELECT * FROM agendas WHERE workspaceId=? ORDER BY createdAt ASC', w));
+    }
+    if (path === '/api/agendas' && method === 'POST') {
+      const b = await body(req);
+      const name = text(b.name, 'Nombre de la agenda', 2, 100);
+      const type = choose(b.type || 'MEDICAL', ['MEDICAL', 'ADMINISTRATIVE', 'SURGERY', 'AESTHETIC', 'GENERAL'], 'Tipo de agenda');
+      const color = optional(b.color, 'Color', 30) || '#1b4c37';
+      const description = optional(b.description, 'Descripción', 500) || '';
+      const agenda = {
+        id: uid(),
+        workspaceId: w,
+        name,
+        type,
+        color,
+        description,
+        createdAt: now()
+      };
+      run('INSERT INTO agendas(id, workspaceId, name, type, color, description, createdAt) VALUES (?,?,?,?,?,?,?)',
+        agenda.id, agenda.workspaceId, agenda.name, agenda.type, agenda.color, agenda.description, agenda.createdAt);
+      audit(u, 'AGENDA_CREATED', 'agenda', agenda.id, `Nueva agenda "${name}" creada.`);
+      return json(res, 201, agenda);
+    }
+    const agDelMatch = path.match(/^\/api\/agendas\/([^/]+)$/);
+    if (agDelMatch && method === 'DELETE') {
+      const agId = agDelMatch[1];
+      run('DELETE FROM agendas WHERE workspaceId=? AND id=?', w, agId);
+      audit(u, 'AGENDA_DELETED', 'agenda', agId, `Agenda eliminada.`);
+      return json(res, 200, { success: true });
+    }
+
+    if (path === '/api/quotes' && method === 'GET') {
+      const list = all('SELECT * FROM quotes WHERE workspaceId=? ORDER BY rowid DESC', w);
+      return json(res, 200, list.map(q => ({ ...q, items: typeof q.items === 'string' ? JSON.parse(q.items) : (q.items || []) })));
+    }
+    if (path === '/api/quotes' && method === 'POST') {
+      const b = await body(req);
+      const pat = patient(w, text(b.patientId, 'Paciente', 1, 100));
+      const doctorId = optional(b.doctorId, 'Profesional', 100);
+      const title = text(b.title, 'Título / Procedimiento', 2, 200);
+      const items = Array.isArray(b.items) && b.items.length ? b.items : [
+        { description: title, quantity: 1, unitPrice: Number(b.total || 0), subtotal: Number(b.total || 0) }
+      ];
+      const currency = choose(b.currency || 'ARS', ['ARS', 'USD'], 'Moneda');
+      const discount = Number(b.discount || 0);
+      const subtotal = items.reduce((acc, it) => acc + (Number(it.quantity || 1) * Number(it.unitPrice || 0)), 0);
+      const total = Math.max(0, subtotal - (subtotal * (discount / 100)));
+      const count = (q('SELECT COUNT(*) as c FROM quotes WHERE workspaceId=?', w)?.c || 0) + 1;
+      const number = `PRE-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`;
+      const validUntil = b.validUntil || new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0];
+      const qte = {
+        id: uid(),
+        workspaceId: w,
+        patientId: pat.id,
+        doctorId: doctorId || null,
+        number,
+        title,
+        items: JSON.stringify(items),
+        subtotal,
+        discount,
+        total,
+        currency,
+        validUntil,
+        status: b.status || 'PENDING',
+        notes: optional(b.notes, 'Notas / Condiciones', 2000) || 'Presupuesto médico con validez sujeta a confirmación quirúrgica y disponibilidad.',
+        createdAt: now(),
+        updatedAt: now()
+      };
+      run('INSERT INTO quotes(id, workspaceId, patientId, doctorId, number, title, items, subtotal, discount, total, currency, validUntil, status, notes, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        qte.id, qte.workspaceId, qte.patientId, qte.doctorId, qte.number, qte.title, qte.items, qte.subtotal, qte.discount, qte.total, qte.currency, qte.validUntil, qte.status, qte.notes, qte.createdAt, qte.updatedAt);
+      audit(u, 'QUOTE_CREATED', 'quote', qte.id, `Presupuesto ${number} por ${currency} ${total} para ${pat.firstName} ${pat.lastName}.`);
+      return json(res, 201, { ...qte, items });
+    }
+    const qtePatchMatch = path.match(/^\/api\/quotes\/([^/]+)$/);
+    if (qtePatchMatch && method === 'PATCH') {
+      const qId = qtePatchMatch[1];
+      const b = await body(req);
+      const existing = q('SELECT * FROM quotes WHERE workspaceId=? AND id=?', w, qId);
+      if (!existing) fail(404, 'Presupuesto no encontrado.');
+      if (b.status) {
+        run('UPDATE quotes SET status=?, updatedAt=? WHERE workspaceId=? AND id=?', b.status, now(), w, qId);
+        audit(u, 'QUOTE_STATUS_UPDATED', 'quote', qId, `Presupuesto ${existing.number} actualizado a ${b.status}.`);
+      }
       return json(res, 200, { success: true });
     }
 
@@ -1062,6 +1287,9 @@ async function handle(req, res) {
         phone: phone(b.phone),
         email,
         coverage: optional(b.coverage, 'Cobertura', 100) || 'Particular',
+        birthDate: optional(b.birthDate, 'Fecha de Nacimiento', 20),
+        cuitCuil: optional(b.cuitCuil, 'CUIT/CUIL', 40),
+        affiliateNumber: optional(b.affiliateNumber, 'Número de Afiliado', 60),
         status: 'ACTIVE',
         notes: optional(b.notes, 'Notas', 2000),
         createdAt: now(),
@@ -1121,7 +1349,7 @@ async function handle(req, res) {
     if (pat && method === 'PATCH') {
       const p = patient(w, pat[1]), b = await body(req);
       const updated = { ...p };
-      for (const k of ['firstName', 'lastName', 'dni', 'email', 'coverage', 'notes']) {
+      for (const k of ['firstName', 'lastName', 'dni', 'email', 'coverage', 'notes', 'birthDate', 'cuitCuil', 'affiliateNumber']) {
         if (k in b) updated[k] = text(b[k], k, k === 'firstName' ? 1 : 0, k === 'notes' ? 2000 : 254);
       }
       if ('medicalHistory' in b) {
@@ -1142,8 +1370,8 @@ async function handle(req, res) {
       if (updated.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(updated.email)) fail(400, 'Correo inválido.');
       if (q('SELECT id FROM patients WHERE workspaceId=? AND phone=? AND id<>?', w, updated.phone, p.id)) fail(409, 'Ya existe un paciente con ese teléfono.', 'DUPLICATE');
       transaction(() => {
-        run('UPDATE patients SET firstName=?,lastName=?,dni=?,phone=?,email=?,coverage=?,status=?,notes=?,medicalHistory=?,updatedAt=? WHERE workspaceId=? AND id=?',
-          updated.firstName, updated.lastName, updated.dni, updated.phone, updated.email, updated.coverage, updated.status, updated.notes, updated.medicalHistory || null, now(), w, p.id);
+        run('UPDATE patients SET firstName=?,lastName=?,dni=?,phone=?,email=?,coverage=?,status=?,notes=?,medicalHistory=?,birthDate=?,cuitCuil=?,affiliateNumber=?,updatedAt=? WHERE workspaceId=? AND id=?',
+          updated.firstName, updated.lastName, updated.dni, updated.phone, updated.email, updated.coverage, updated.status, updated.notes, updated.medicalHistory || null, updated.birthDate || null, updated.cuitCuil || null, updated.affiliateNumber || null, now(), w, p.id);
         audit(u, 'PATIENT_UPDATED', 'patient', p.id, `Ficha del paciente actualizada.`);
       });
       return json(res, 200, patient(w, p.id));
@@ -1283,28 +1511,34 @@ async function handle(req, res) {
     if (path === '/api/records' && method === 'POST') {
       const b = await body(req);
       patient(w, text(b.patientId, 'Paciente', 1, 100));
-      const content = {
-        subjective: text(b.subjective, 'Subjetivo', 1, 8000),
-        objective: optional(b.objective, 'Objetivo', 8000),
-        assessment: optional(b.assessment, 'Evaluación', 8000),
-        plan: text(b.plan, 'Plan', 1, 8000)
-      };
       const amendmentOf = b.amendmentOf ? text(b.amendmentOf, 'Registro original', 1, 100) : null;
       if (amendmentOf && !q('SELECT id FROM records WHERE id=? AND workspaceId=? AND patientId=?', amendmentOf, w, b.patientId)) {
         fail(404, 'Registro original no encontrado.');
       }
+      const recordType = b.type || (amendmentOf ? 'AMENDMENT' : 'SOAP_NOTE');
+      const content = {
+        subjective: optional(b.subjective, 'Subjetivo', 8000) || '',
+        objective: optional(b.objective, 'Objetivo', 8000) || '',
+        assessment: optional(b.assessment, 'Evaluación', 8000) || '',
+        plan: optional(b.plan, 'Plan', 8000) || '',
+        problem: optional(b.problem, 'Problema / Diagnóstico', 500) || '',
+        specialty: optional(b.specialty, 'Especialidad', 200) || 'Medicina General',
+        title: optional(b.title, 'Título', 200) || '',
+        vitals: b.vitals || null,
+        attachments: Array.isArray(b.attachments) ? b.attachments : []
+      };
       const r = transaction(() => {
         const previous = q('SELECT hash FROM records WHERE workspaceId=? AND patientId=? ORDER BY rowid DESC LIMIT 1', w, b.patientId);
         const r = {
           id: uid(), workspaceId: w, patientId: b.patientId,
-          type: amendmentOf ? 'AMENDMENT' : 'SOAP_NOTE',
+          type: recordType,
           content: JSON.stringify(content),
           author: u.name, createdAt: now(),
           previousHash: previous?.hash || '', hash: '', amendmentOf
         };
         r.hash = recordHash(r);
         put('records', r);
-        audit(u, 'RECORD_APPENDED', 'record', r.id, `Evolución clínica registrada por ${u.name}.`);
+        audit(u, 'RECORD_APPENDED', 'record', r.id, `Registro clínico (${recordType}) registrado por ${u.name}.`);
         return r;
       });
       return json(res, 201, { ...r, content, legalSignature: true });
@@ -1344,6 +1578,8 @@ async function handle(req, res) {
         title,
         type,
         content,
+        patientSignature: b.patientSignature || null,
+        doctorSignature: b.doctorSignature || null,
         status: 'SIGNED',
         hash: digest,
         signedAt,

@@ -21,12 +21,62 @@ export class ComplianceService {
   /**
    * Genera una vista imprimible/documental oficial con bloque de verificación criptográfica
    */
-  static generateOfficialDocumentHtml({ title, clinicName, doctorName, specialty, licenseNumber, patientName, patientDni, content, dateIso, signatureDigest, verifyUrl }) {
+  static generateOfficialDocumentHtml({ title, clinicName, doctorName, specialty, licenseNumber, patientName, patientDni, content, dateIso, signatureDigest, verifyUrl, patientSignature, isConsent }) {
     const formattedDate = new Intl.DateTimeFormat('es-AR', {
       timeZone: 'America/Argentina/Buenos_Aires',
       dateStyle: 'full',
       timeStyle: 'medium'
     }).format(new Date(dateIso));
+
+    const signatureBlockHtml = (isConsent || patientSignature) ? `
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 30px;">
+    <!-- Firma del Paciente / Representante Legal -->
+    <div style="border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 10px; padding: 18px; display: flex; flex-direction: column; justify-content: space-between;">
+      <div>
+        <div class="badge-signature" style="background:#e0f2fe; color:#0369a1;">✓ CONFORMIDAD DEL PACIENTE (LEY 26.529)</div>
+        <div style="height: 75px; display: flex; align-items: center; justify-content: center; margin: 10px 0; border: 1px dashed #cbd5e1; border-radius: 6px; background: #fff;">
+          ${patientSignature ? `<img src="${patientSignature}" style="max-height: 65px; max-width: 90%; object-fit: contain;" alt="Firma del Paciente">` : `<span style="color:#64748b; font-size: 12px; font-style: italic;">Firma ológrafa digitalizada registrada</span>`}
+        </div>
+        <div class="doctor-title" style="font-size:14px">${patientName}</div>
+        <div class="doctor-meta">DNI: ${patientDni || '—'} · Paciente / Declarante</div>
+      </div>
+      <div style="font-size:10.5px; color:#64748b; line-height: 1.4; border-top: 1px solid #e2e8f0; padding-top: 8px;">
+        Otorga conformidad libre, expresa e informada luego de haber recibido las explicaciones médicas requeridas.
+      </div>
+    </div>
+
+    <!-- Firma y Sello del Profesional de la Salud -->
+    <div class="signature-card" style="margin: 0; box-sizing: border-box;">
+      <div>
+        <div class="badge-signature">✓ PROFESIONAL DE LA SALUD ACTUANTE</div>
+        <div class="doctor-title">${doctorName}</div>
+        <div class="doctor-meta">${specialty} · Matrícula N° ${licenseNumber || 'MN-89201'}</div>
+        <div class="seal-box">
+          <strong>Firma Digital HMAC-SHA256:</strong><br>
+          ${signatureDigest.slice(0, 36)}...
+        </div>
+      </div>
+      <div class="qr-side">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(verifyUrl || ('https://abundance.clinic/verify/' + signatureDigest))}" alt="QR Verificación Oficial" class="qr-img">
+        <span>Escanea para verificar</span>
+      </div>
+    </div>
+  </div>` : `
+  <div class="signature-card">
+    <div>
+      <div class="badge-signature">✓ FIRMADO CRIPTOGRÁFICAMENTE</div>
+      <div class="doctor-title">${doctorName}</div>
+      <div class="doctor-meta">${specialty} · Matrícula Profesional N° ${licenseNumber || 'MN-89201'}</div>
+      <div class="seal-box">
+        <strong>Firma Digital Digest (HMAC-SHA256):</strong><br>
+        ${signatureDigest}
+      </div>
+    </div>
+    <div class="qr-side">
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(verifyUrl || ('https://abundance.clinic/verify/' + signatureDigest))}" alt="QR Verificación Oficial" class="qr-img">
+      <span>Escanea para verificar autenticidad</span>
+    </div>
+  </div>`;
 
     return `<!doctype html>
 <html lang="es">
@@ -77,21 +127,7 @@ export class ComplianceService {
     <div><b>Especialidad:</b> ${specialty}</div>
   </div>
   <div class="content-box">${content}</div>
-  <div class="signature-card">
-    <div>
-      <div class="badge-signature">✓ FIRMADO CRIPTOGRÁFICAMENTE</div>
-      <div class="doctor-title">${doctorName}</div>
-      <div class="doctor-meta">${specialty} · Matrícula Profesional N° ${licenseNumber || 'MN-89201'}</div>
-      <div class="seal-box">
-        <strong>Firma Digital Digest (HMAC-SHA256):</strong><br>
-        ${signatureDigest}
-      </div>
-    </div>
-    <div class="qr-side">
-      <img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(verifyUrl || ('https://abundance.clinic/verify/' + signatureDigest))}" alt="QR Verificación Oficial" class="qr-img">
-      <span>Escanea para verificar autenticidad</span>
-    </div>
-  </div>
+  ${signatureBlockHtml}
   <div class="footer">
     <span>Documento clínico electrónico emitido con validez criptográfica inmutable.</span>
     <span>Abundance Clinic OS · Identificador: ${signatureDigest.slice(0, 16)}</span>
