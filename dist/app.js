@@ -956,46 +956,40 @@ function brand() {
 
 function loginPage(error = '') {
   $('#app').innerHTML = `<div class="login-page">
-    <section class="login-story">
-      ${brand()}
-      <div class="login-copy">
-        <div class="eyebrow">PLATAFORMA INTEGRAL DE SALUD</div>
-        <h1>Todo conectado.<br><em>Tu clínica, en orden.</em></h1>
+    <div class="login-container-inner">
+      <section class="login-hero-left">
+        ${brand()}
+        <div class="login-badge-pill">PLATAFORMA INTEGRAL DE SALUD</div>
+        <h1>Todo conectado.<br><span>Tu clínica, en orden.</span></h1>
         <p>Gestión médica unificada: agendas coordinadas, historias clínicas electrónicas, seguimiento de pacientes y facturación integrada.</p>
-        <div class="login-features">
-          <div class="login-feature">${icon('calendar', 17)} Agenda médica y consultorios sin cruces</div>
-          <div class="login-feature">${icon('file', 17)} Historias clínicas inmutables con trazabilidad</div>
-          <div class="login-feature">${icon('plug', 17)} Conexión con WhatsApp, CRM, Mercado Pago y Facturación</div>
-        </div>
-      </div>
-      <div class="login-story-footer">ABUNDANCE MEDIA &nbsp; / &nbsp; CLINIC OS v1.2</div>
-    </section>
-    <section class="login-form-side">
-      <div class="login-form-wrap">
-        <h2>Acceso al Sistema</h2>
-        <p class="login-desc">Ingresa tus credenciales profesionales autorizadas.</p>
-        <form data-form="login">
-          <div class="form-field">
-            <label for="email">Correo electrónico profesional</label>
-            <input id="email" name="email" type="email" required autocomplete="username" placeholder="doctor@tuclinica.com">
-          </div>
-          <div class="form-field">
-            <label for="password">Contraseña</label>
-            <div class="flex" style="gap:6px">
-              <input id="password" name="password" type="password" required autocomplete="current-password" placeholder="Tu contraseña" class="grow">
-              <button type="button" class="icon-btn" data-action="show-password" aria-label="Mostrar contraseña">${icon('eye', 18)}</button>
+      </section>
+      <section class="login-form-side">
+        <div class="login-card-white">
+          <h2>Acceso al Sistema</h2>
+          <p class="login-desc">Ingresa tus credenciales profesionales autorizadas.</p>
+          <form data-form="login">
+            <div class="form-field">
+              <label for="email">Correo electrónico profesional</label>
+              <input id="email" name="email" type="email" required autocomplete="username" placeholder="doctor@tuclinica.com">
             </div>
-          </div>
-          <div class="between" style="margin-top: 8px; font-size: 12px;">
-            <span></span>
-            <a href="#" data-action="forgot-password" class="text-link">¿Olvidaste tu contraseña?</a>
-          </div>
-          <div class="form-error" role="alert">${esc(error)}</div>
-          <div style="height:15px"></div>
-          <button class="btn primary wide" type="submit">Ingresar a la clínica ${icon('arrow', 15)}</button>
-        </form>
-      </div>
-    </section>
+            <div class="form-field">
+              <label for="password">Contraseña</label>
+              <div class="flex" style="gap:6px">
+                <input id="password" name="password" type="password" required autocomplete="current-password" placeholder="Tu contraseña" class="grow">
+                <button type="button" class="icon-btn" data-action="show-password" aria-label="Mostrar contraseña">${icon('eye', 18)}</button>
+              </div>
+            </div>
+            <div class="between" style="margin-top: 8px; font-size: 12px;">
+              <span></span>
+              <a href="#" data-action="forgot-password" class="text-link" style="color:#235b43">¿Olvidaste tu contraseña?</a>
+            </div>
+            <div class="form-error" role="alert">${esc(error)}</div>
+            <div style="height:15px"></div>
+            <button class="btn-login-submit" type="submit">Ingresar a la clínica ${icon('arrow', 15)}</button>
+          </form>
+        </div>
+      </section>
+    </div>
   </div>`;
 }
 
@@ -2076,9 +2070,9 @@ function recordsView() {
           <!-- Left Filter Sidebar -->
           <aside class="omni-sidebar">
             <div class="omni-filter-group">
-              <div class="search-field" style="width:100%">
-                ${icon('search', 14)}
-                <input type="search" placeholder="Filtrar..." value="${esc(S.omniSearch || '')}" data-action="omni-search" style="font-size:12px;padding:6px 8px 6px 30px">
+              <div class="omni-search-box">
+                <span class="omni-search-icon">${icon('search', 14)}</span>
+                <input type="search" class="omni-search-input" placeholder="Filtrar..." value="${esc(S.omniSearch || '')}" data-action="omni-search">
               </div>
             </div>
 
@@ -2092,13 +2086,13 @@ function recordsView() {
 
             <div class="omni-filter-group">
               <span class="omni-filter-title">Fechas</span>
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
-                <span class="tiny muted" style="min-width:38px">Desde</span>
-                <input type="date" class="input" style="font-size:11px;padding:4px 6px" value="${esc(S.omniFromDate || '')}" data-action="omni-from">
+              <div class="omni-date-row">
+                <span class="omni-date-label">Desde</span>
+                <input type="date" class="omni-date-input" value="${esc(S.omniFromDate || '')}" data-action="omni-from">
               </div>
-              <div style="display:flex;align-items:center;gap:6px">
-                <span class="tiny muted" style="min-width:38px">Hasta</span>
-                <input type="date" class="input" style="font-size:11px;padding:4px 6px" value="${esc(S.omniToDate || '')}" data-action="omni-to">
+              <div class="omni-date-row">
+                <span class="omni-date-label">Hasta</span>
+                <input type="date" class="omni-date-input" value="${esc(S.omniToDate || '')}" data-action="omni-to">
               </div>
             </div>
 
@@ -3326,8 +3320,11 @@ function uploadStudyDialog(patientId = null) {
       <input type="file" id="study-file-picker" required accept=".pdf,.png,.jpg,.jpeg">
       <div id="study-file-info" class="tiny muted" style="margin-top:4px">Selecciona el informe o imagen escaneada para alojar.</div>
       <input type="hidden" name="attachmentPayload" id="study-attachment-payload">
-    </div>` +
-    area('Resultados / Observaciones del estudio', 'notes', '', 'maxlength="4000" placeholder="Valores sobresalientes, informe del especialista o notas...'),
+    </div>
+    <div class="form-field full">
+      <label for="field-notes">Resultados / Observaciones del estudio</label>
+      <textarea id="field-notes" name="notes" class="input" style="height:95px;resize:vertical" maxlength="4000" placeholder="Valores sobresalientes, informe del especialista o notas..."></textarea>
+    </div>`,
     'Guardar y Alojar en Historial', `data-patient-id="${p?.id}"`, 'wide'
   );
 
@@ -3620,28 +3617,24 @@ function inventoryForm(id = null) {
   const isEdit = Boolean(item);
   formDialog('inventory', isEdit ? 'Editar Insumo Médico' : 'Registrar Nuevo Insumo', 'Gestión de insumos clínicos, materiales descartables y medicamentos.',
     field('Nombre o descripción del insumo *', 'name', 'text', item?.name || '', 'required maxlength="150" placeholder="Ej. Gasas estériles 10x10cm (Caja x 100)"', true) +
-    `<div class="form-grid">
-      ${field('Código SKU / Referencia', 'sku', 'text', item?.sku || '', 'maxlength="50" placeholder="Ej. GAS-001"')}
-      ${selectField('Categoría *', 'category', [
-        ['Descartables', 'Descartables'],
-        ['Suturas y Curaciones', 'Suturas y Curaciones'],
-        ['Medicamentos', 'Medicamentos'],
-        ['Antisépticos', 'Antisépticos'],
-        ['Soluciones y Sueros', 'Soluciones y Sueros'],
-        ['Instrumental', 'Instrumental'],
-        ['Diagnóstico', 'Diagnóstico'],
-        ['Otro', 'Otro']
-      ], item?.category || 'Descartables')}
-    </div>` +
-    `<div class="form-grid">
+    field('Código SKU / Referencia', 'sku', 'text', item?.sku || '', 'maxlength="50" placeholder="Ej. GAS-001"') +
+    selectField('Categoría *', 'category', [
+      ['Descartables', 'Descartables'],
+      ['Suturas y Curaciones', 'Suturas y Curaciones'],
+      ['Medicamentos', 'Medicamentos'],
+      ['Antisépticos', 'Antisépticos'],
+      ['Soluciones y Sueros', 'Soluciones y Sueros'],
+      ['Instrumental', 'Instrumental'],
+      ['Diagnóstico', 'Diagnóstico'],
+      ['Otro', 'Otro']
+    ], item?.category || 'Descartables') +
+    `<div class="form-field full" style="display:grid;grid-template-columns:${isEdit ? '1fr 1fr' : '1fr 1fr 1fr'};gap:12px;margin:0;padding:0">
       ${isEdit ? '' : field('Cantidad inicial en stock *', 'quantity', 'number', item?.quantity ?? 0, 'required min="0" step="1"')}
       ${field('Stock mínimo de alerta *', 'minQuantity', 'number', item?.minQuantity ?? 10, 'required min="0" step="1"')}
       ${field('Unidad de medida *', 'unit', 'text', item?.unit || 'unidades', 'required maxlength="50" placeholder="unidades, cajas, frascos, rollos"')}
     </div>` +
-    `<div class="form-grid">
-      ${field('Número de lote', 'lotNumber', 'text', item?.lotNumber || '', 'maxlength="50" placeholder="Ej. LT-2024-89"')}
-      ${field('Fecha de vencimiento', 'expiryDate', 'date', item?.expiryDate || '', '')}
-    </div>` +
+    field('Número de lote', 'lotNumber', 'text', item?.lotNumber || '', 'maxlength="50" placeholder="Ej. LT-2024-89"') +
+    field('Fecha de vencimiento', 'expiryDate', 'date', item?.expiryDate || '', '') +
     area('Observaciones / Ubicación en clínica', 'notes', item?.notes || '', 'maxlength="500" placeholder="Ej. Almacén Central - Estantería 2"'),
     isEdit ? 'Guardar Cambios' : 'Registrar Insumo'
   );
@@ -4310,22 +4303,23 @@ document.addEventListener('submit', async e => {
       }
       case 'upload-study': {
         let fileData = [];
-        try { fileData = JSON.parse(b.attachmentsJson || '[]'); } catch {}
+        try { fileData = JSON.parse(b.attachmentPayload || b.attachmentsJson || '[]'); } catch {}
+        const stType = b.studyType || b.type || 'STUDY';
         await api('/api/records', 'POST', {
           patientId: b.patientId,
-          type: b.type || 'STUDY',
-          problem: b.problem || '',
+          type: stType,
+          problem: b.problem || b.title || 'Estudio / Laboratorio',
           specialty: b.specialty || '',
           title: b.title || 'Estudio / Laboratorio',
           content: {
             notes: b.notes || '',
-            studyType: b.type
+            studyType: stType
           },
           attachments: fileData
         });
         S.selectedPatient = b.patientId;
         S.view = 'records';
-        S.omniTab = (b.type === 'LAB') ? 'laboratorio' : 'estudios';
+        S.omniTab = (stType === 'LAB') ? 'laboratorio' : 'estudios';
         message = 'Estudio / archivo cargado exitosamente en el historial.';
         break;
       }
