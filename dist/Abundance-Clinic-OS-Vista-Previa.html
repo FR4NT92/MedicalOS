@@ -552,6 +552,251 @@
   outline: none;
 }
 
+/* ==========================================================================
+   PORTAL DEL PACIENTE (PATIENT PORTAL)
+   ========================================================================== */
+
+.portal-auth-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at top, #1a4332 0%, #0d281e 60%, #071912 100%);
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.portal-auth-card {
+  width: 100%;
+  max-width: 440px;
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 36px 32px;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.1);
+  box-sizing: border-box;
+  animation: fadeIn 0.25s ease-out;
+}
+
+.portal-auth-brand {
+  text-align: center;
+  margin-bottom: 22px;
+}
+
+.portal-badge-pill {
+  display: inline-block;
+  padding: 3px 10px;
+  background: #eaf6ee;
+  border: 1px solid #c2e5cf;
+  color: #1b4c37;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.portal-shell {
+  min-height: 100vh;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+}
+
+.portal-header {
+  background: linear-gradient(135deg, #0d281e 0%, #153a2a 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.portal-header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.portal-brand-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.portal-user-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.portal-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #8be1a8;
+  color: #0d281e;
+  font-weight: 700;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.portal-user-info {
+  text-align: right;
+  line-height: 1.25;
+}
+
+.portal-tabs-nav {
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  position: sticky;
+  top: 60px;
+  z-index: 30;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+}
+
+.portal-tabs-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 20px;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.portal-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 14px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.portal-tab-btn:hover {
+  color: #0f172a;
+}
+
+.portal-tab-btn.active {
+  color: #1b4c37;
+  border-bottom-color: #1b4c37;
+}
+
+.portal-content {
+  max-width: 1100px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 24px 20px 48px;
+  flex: 1;
+}
+
+.portal-hero-box {
+  background: linear-gradient(135deg, #123524 0%, #1c5239 100%);
+  border-radius: 16px;
+  padding: 24px;
+  color: #ffffff;
+  box-shadow: 0 8px 24px rgba(18, 53, 36, 0.25);
+  margin-bottom: 24px;
+}
+
+.portal-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.portal-action-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.03);
+}
+
+.portal-action-card:hover {
+  border-color: #1b4c37;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px rgba(27, 76, 55, 0.1);
+}
+
+.portal-action-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: #eaf6ee;
+  color: #1b4c37;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.portal-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+}
+
+.portal-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.portal-footer {
+  border-top: 1px solid #e2e8f0;
+  background: #ffffff;
+  padding: 18px 20px;
+  text-align: center;
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+@media (max-width: 640px) {
+  .portal-header-inner {
+    flex-wrap: wrap;
+  }
+  .portal-user-meta {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .portal-hero-box {
+    padding: 18px;
+  }
+  .portal-actions-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
 
 </style>
 </head>
@@ -709,7 +954,8 @@ const paths = {
   integrations: '/integrations',
   settings: '/settings',
   audit: '/audit',
-  admin: '/admin'
+  admin: '/admin',
+  portal: '/portal'
 };
 
 const titles = {
@@ -725,7 +971,8 @@ const titles = {
   integrations: 'Conexiones e Integraciones',
   settings: 'Configuración',
   audit: 'Auditoría del Sistema',
-  admin: 'Espacios Clínicos'
+  admin: 'Espacios Clínicos',
+  portal: 'Portal del Paciente'
 };
 
 const statusMap = {
@@ -905,7 +1152,26 @@ const S = {
   recordTab: 'notes',
   agendaCollapsed: false,
   supportMode: null,
-  preview: PREVIEW
+  preview: PREVIEW,
+  portal: {
+    token: localStorage.getItem('portal_token') || '',
+    patient: null,
+    data: null,
+    activeTab: 'inicio',
+    step: 'dni',
+    dniEntered: '',
+    phoneEntered: '',
+    demoCode: '',
+    error: '',
+    bookingModal: false,
+    uploadModal: false,
+    bookingDoctor: '',
+    bookingDate: dateKey(),
+    bookingTime: '10:00',
+    bookingType: 'Consulta Médica',
+    bookingAgenda: 'default',
+    bookingNotes: ''
+  }
 };
 
 async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
@@ -1552,6 +1818,225 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     return updated;
   }
 
+  if (path.startsWith('/api/portal/auth/request-otp') && method === 'POST') {
+    const dni = (body?.dni || '').trim();
+    const phone = (body?.phone || '').trim();
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?select=*&dni=eq.${dni}&limit=1`, { headers: authHeaders }).catch(() => null);
+    const pats = (await res?.json?.()) || [];
+    if (!pats.length) {
+      return { ok: true, exists: false, message: 'No encontramos una ficha registrada con este DNI.' };
+    }
+    const p = pats[0];
+    const demoCode = '123456';
+    sessionStorage.setItem('portal_demo_pat_' + dni, JSON.stringify(p));
+    return {
+      ok: true,
+      exists: true,
+      patientName: p.first_name || p.firstName,
+      phoneMasked: (p.phone || '').slice(-4),
+      demoCode,
+      message: 'Código de seguridad enviado por WhatsApp.'
+    };
+  }
+
+  if (path.startsWith('/api/portal/auth/verify-otp') && method === 'POST') {
+    const dni = (body?.dni || '').trim();
+    const code = (body?.code || '').trim();
+    const patRaw = sessionStorage.getItem('portal_demo_pat_' + dni);
+    let p = patRaw ? JSON.parse(patRaw) : null;
+    if (!p) {
+      const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?select=*&dni=eq.${dni}&limit=1`, { headers: authHeaders }).catch(() => null);
+      const pats = (await res?.json?.()) || [];
+      p = pats[0];
+    }
+    if (!p) throw Error('Paciente no encontrado.');
+    const token = 'ptok_' + p.id;
+    return {
+      token,
+      patient: {
+        id: p.id,
+        firstName: p.first_name || p.firstName,
+        lastName: p.last_name || p.lastName,
+        dni: p.dni,
+        phone: p.phone,
+        email: p.email,
+        coverage: p.coverage,
+        affiliateNumber: p.affiliate_number || p.affiliateNumber
+      }
+    };
+  }
+
+  if (path === '/api/portal/auth/register' && method === 'POST') {
+    const newId = 'pat-' + makeId().slice(0, 8);
+    const newPat = {
+      id: newId,
+      workspace_id: 'clinic-central',
+      first_name: body.firstName,
+      last_name: body.lastName || '',
+      dni: body.dni,
+      phone: body.phone,
+      email: body.email || '',
+      coverage: body.coverage || 'Particular',
+      status: 'ACTIVE',
+      notes: 'Registrado online vía Portal Pacientes',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newPat)
+    });
+    return {
+      ok: true,
+      token: 'ptok_' + newId,
+      patient: { ...newPat, firstName: newPat.first_name, lastName: newPat.last_name }
+    };
+  }
+
+  if (path === '/api/portal/data' && method === 'GET') {
+    const pTok = headers['Authorization']?.slice(7) || S.portal?.token || localStorage.getItem('portal_token');
+    const patId = pTok?.replace('ptok_', '');
+    const [patRes, docRes, agRes, apptRes, recRes, presRes] = await Promise.all([
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?id=eq.${patId}&limit=1`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/doctors?select=*`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/agendas?select=*`, { headers: authHeaders }).catch(() => ({ json: () => [] })),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?patient_id=eq.${patId}&order=start_at.desc`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/records?patient_id=eq.${patId}&order=created_at.desc`, { headers: authHeaders }),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/prescriptions?patient_id=eq.${patId}&order=created_at.desc`, { headers: authHeaders }).catch(() => ({ json: () => [] }))
+    ]);
+    const p = (await patRes.json())?.[0] || S.portal?.patient || {};
+    const doctors = (await docRes.json()) || [];
+    const agendas = (await agRes.json()) || [];
+    const appointments = ((await apptRes.json()) || []).map(a => {
+      const doc = doctors.find(d => d.id === a.doctor_id);
+      return {
+        id: a.id,
+        doctorId: a.doctor_id,
+        doctorName: doc?.name || 'Profesional de la clínica',
+        doctorSpecialty: doc?.specialty || '',
+        startAt: a.start_at,
+        endAt: a.end_at,
+        duration: a.duration,
+        type: a.type,
+        status: a.status,
+        notes: a.notes
+      };
+    });
+    const records = ((await recRes.json()) || []).map(r => {
+      let parsed = {};
+      try { parsed = typeof r.content === 'object' ? r.content : JSON.parse(r.content || '{}'); } catch {}
+      return {
+        id: r.id,
+        type: r.type,
+        title: parsed.title || parsed.problem || (r.type === 'STUDY' ? 'Estudio / Laboratorio' : 'Evolución médica'),
+        specialty: parsed.specialty || '',
+        notes: parsed.notes || '',
+        attachments: parsed.attachments || [],
+        createdAt: r.created_at,
+        author: r.author
+      };
+    });
+    const prescriptions = ((await presRes.json()) || []).map(pr => ({
+      id: pr.id,
+      content: pr.content,
+      status: pr.status,
+      createdAt: pr.created_at
+    }));
+
+    return {
+      patient: {
+        id: p.id,
+        firstName: p.first_name || p.firstName,
+        lastName: p.last_name || p.lastName,
+        dni: p.dni,
+        phone: p.phone,
+        email: p.email,
+        coverage: p.coverage,
+        affiliateNumber: p.affiliate_number || p.affiliateNumber
+      },
+      clinic: {
+        name: 'Abundance Medical & Clinic OS',
+        specialty: 'Centro Médico Integral',
+        address: 'Av. Libertador 5900, CABA',
+        phone: '+54 11 4000-0000'
+      },
+      doctors,
+      agendas,
+      appointments,
+      prescriptions,
+      invoices: [],
+      records,
+      consents: []
+    };
+  }
+
+  if (path === '/api/portal/appointments' && method === 'POST') {
+    const pTok = headers['Authorization']?.slice(7) || S.portal?.token || localStorage.getItem('portal_token');
+    const patId = pTok?.replace('ptok_', '') || S.portal?.patient?.id;
+    const newAppt = {
+      id: 'app-' + makeId().slice(0, 8),
+      workspace_id: 'clinic-central',
+      patient_id: patId,
+      doctor_id: body.doctorId,
+      agenda_id: body.agendaId || 'default',
+      start_at: `${body.date}T${body.time}:00-03:00`,
+      end_at: new Date(Date.parse(`${body.date}T${body.time}:00-03:00`) + (Number(body.duration) || 30) * 60000).toISOString(),
+      duration: Number(body.duration) || 30,
+      type: body.type || 'Consulta Médica',
+      status: 'CONFIRMED',
+      notes: body.notes || 'Turno solicitado online por el paciente',
+      created_at: new Date().toISOString()
+    };
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newAppt)
+    });
+    return { ok: true, appointment: newAppt };
+  }
+
+  if (path.startsWith('/api/portal/appointments/') && path.endsWith('/cancel') && method === 'POST') {
+    const id = path.slice('/api/portal/appointments/'.length, -'/cancel'.length);
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?id=eq.${id}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify({ status: 'CANCELLED' })
+    });
+    return { ok: true };
+  }
+
+  if (path === '/api/portal/upload-study' && method === 'POST') {
+    const pTok = headers['Authorization']?.slice(7) || S.portal?.token || localStorage.getItem('portal_token');
+    const patId = pTok?.replace('ptok_', '') || S.portal?.patient?.id;
+    let attachments = [];
+    try { attachments = JSON.parse(body.attachmentPayload || body.attachmentsJson || '[]'); } catch {}
+    const newRec = {
+      id: 'rec-' + makeId().slice(0, 8),
+      workspace_id: 'clinic-central',
+      patient_id: patId,
+      type: body.studyType || 'STUDY',
+      content: {
+        title: body.title,
+        studyType: body.studyType,
+        specialty: body.specialty,
+        notes: body.notes,
+        attachments,
+        uploadedVia: 'PORTAL_PACIENTES'
+      },
+      author: 'Paciente (Subida Online)',
+      created_at: new Date().toISOString(),
+      previous_hash: 'PORTAL-GENESIS',
+      hash: 'sha256-' + makeId() + makeId()
+    };
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/records`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newRec)
+    });
+    return { ok: true, message: 'Estudio subido exitosamente a tu historia clínica.' };
+  }
+
   return { success: true };
 }
 
@@ -1565,6 +2050,7 @@ async function api(path, method = 'GET', body = null, headers = {}) {
         'Content-Type': 'application/json',
         ...(S.session?.csrf ? { 'X-CSRF-Token': S.session.csrf } : {}),
         ...(S.supportMode?.id ? { 'X-Workspace-Id': S.supportMode.id } : {}),
+        ...(S.portal?.token ? { 'Authorization': 'Bearer ' + S.portal.token } : {}),
         ...headers
       },
       ...(body === null ? {} : { body: JSON.stringify(body) })
@@ -1674,6 +2160,11 @@ function loginPage(error = '') {
             <div style="height:15px"></div>
             <button class="btn-login-submit" type="submit">Ingresar a la clínica ${icon('arrow', 15)}</button>
           </form>
+          <div style="margin-top:22px;padding-top:16px;border-top:1px solid #e2e8f0;text-align:center">
+            <a href="/portal" data-nav="portal" class="text-link" style="color:#1b4c37;font-weight:600;font-size:12.5px;display:inline-flex;align-items:center;gap:6px">
+              ${icon('user', 14)} ¿Sos paciente de la clínica? <b>Ingresar a Mi Portal de Salud →</b>
+            </a>
+          </div>
         </div>
       </section>
     </div>
@@ -1789,7 +2280,660 @@ function content() {
   return (views[S.view] || homeView)() + `<footer class="footnote"><span>ABUNDANCE CLINIC OS &nbsp; / &nbsp; Plataforma de Gestión Médica e Inteligencia Operativa.</span><span>Versión 1.2</span></footer>`;
 }
 
+// ==========================================
+// PORTAL DEL PACIENTE (VISTA WEB CLIENTE)
+// ==========================================
+
+async function refreshPortal() {
+  if (!S.portal?.token) return;
+  try {
+    const data = await api('/api/portal/data');
+    S.portal.data = data;
+    S.portal.patient = data.patient;
+  } catch (err) {
+    console.error('[refreshPortal error]', err);
+    if (err.message?.includes('caducado') || err.message?.includes('expirada')) {
+      localStorage.removeItem('portal_token');
+      S.portal.token = '';
+      S.portal.patient = null;
+      S.portal.data = null;
+    }
+  }
+}
+
+function portalPage() {
+  if (!S.portal?.token || !S.portal?.data) {
+    return portalAuthPage();
+  }
+  return portalView();
+}
+
+function portalAuthPage() {
+  const step = S.portal.step || 'dni';
+  $('#app').innerHTML = `
+    <div class="portal-auth-shell">
+      <div class="portal-auth-card">
+        <div class="portal-auth-brand">
+          <div class="brandmark" style="background:#15372f;color:#d6f1be;width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 12px">
+            ${brandLogoSvg(22, '#d6f1be')}
+          </div>
+          <div style="font-size:19px;font-weight:700;color:#18362b">abundance<span style="color:#2a6845">.</span></div>
+          <span class="portal-badge-pill" style="margin-top:6px">PORTAL DEL PACIENTE</span>
+        </div>
+
+        ${step === 'dni' ? `
+          <div style="text-align:center;margin-bottom:24px">
+            <h2 style="font-size:20px;font-weight:700;color:#0f172a;margin-bottom:6px">Tu Salud en un Solo Lugar</h2>
+            <p style="font-size:12.5px;color:#64748b;line-height:1.5">Gestiona tus turnos, descarga recetas y facturas, y comparte tus análisis médicos directamente con tu clínica.</p>
+          </div>
+          <form data-form="portal-request-code">
+            <div class="form-field full" style="margin-bottom:14px">
+              <label for="p-dni" style="font-weight:600;font-size:12px;color:#334155;margin-bottom:6px;display:block">Número de Documento (DNI) *</label>
+              <input id="p-dni" name="dni" type="text" required placeholder="Ej: 35123456" value="${esc(S.portal.dniEntered || '')}" class="input" style="width:100%;box-sizing:border-box;padding:10px 14px;border-radius:8px;border:1px solid #d1d5db;font-size:14px">
+            </div>
+            <div class="form-field full" style="margin-bottom:18px">
+              <label for="p-phone" style="font-weight:600;font-size:12px;color:#334155;margin-bottom:6px;display:block">Teléfono Celular / WhatsApp *</label>
+              <input id="p-phone" name="phone" type="tel" required placeholder="Ej: +54 9 11 4000-0000" value="${esc(S.portal.phoneEntered || '')}" class="input" style="width:100%;box-sizing:border-box;padding:10px 14px;border-radius:8px;border:1px solid #d1d5db;font-size:14px">
+              <small class="muted" style="font-size:11px;margin-top:5px;display:block">Te enviaremos un código de seguridad para verificar tu identidad.</small>
+            </div>
+            <div class="form-error" role="alert"></div>
+            <div style="height:10px"></div>
+            <button class="btn primary wide" type="submit" style="min-height:44px;border-radius:10px;font-size:13px;font-weight:600;background:#1b4c37;width:100%">
+              Continuar con verificación por WhatsApp ${icon('arrow', 14)}
+            </button>
+          </form>
+          <div style="margin-top:22px;padding-top:16px;border-top:1px solid #f1f5f9;text-align:center">
+            <button type="button" class="text-link" data-action="portal-go-register" style="font-size:12.5px;color:#1b4c37;font-weight:600">
+              ¿Sos un paciente nuevo? <b>Regístrate aquí →</b>
+            </button>
+          </div>
+        ` : step === 'otp' ? `
+          <div style="text-align:center;margin-bottom:20px">
+            <h2 style="font-size:20px;font-weight:700;color:#0f172a;margin-bottom:6px">Código de Seguridad</h2>
+            <p style="font-size:12.5px;color:#64748b;line-height:1.5">Ingresa el código de 6 dígitos que enviamos por WhatsApp a tu celular (...${esc(S.portal.phoneMasked || '****')}).</p>
+          </div>
+          ${S.portal.demoCode ? `
+            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:10px 14px;margin-bottom:18px;text-align:center">
+              <span style="font-size:11px;color:#166534;font-weight:600">Código de acceso instantáneo:</span>
+              <div style="font-size:24px;font-weight:800;color:#14532d;letter-spacing:6px;margin-top:3px">${esc(S.portal.demoCode)}</div>
+            </div>
+          ` : ''}
+          <form data-form="portal-verify-code">
+            <div class="form-field full" style="margin-bottom:20px;text-align:center">
+              <input id="p-otp" name="code" type="text" maxlength="6" required autocomplete="one-time-code" placeholder="123456" class="input" style="width:100%;box-sizing:border-box;font-size:24px;letter-spacing:8px;text-align:center;padding:12px;font-weight:700;border-radius:10px;border:1px solid #d1d5db">
+            </div>
+            <div class="form-error" role="alert"></div>
+            <button class="btn primary wide" type="submit" style="min-height:44px;border-radius:10px;font-size:13px;font-weight:600;background:#1b4c37;width:100%">
+              Ingresar a Mi Portal ${icon('check', 15)}
+            </button>
+          </form>
+          <div style="margin-top:18px;text-align:center">
+            <button type="button" class="text-link muted" data-action="portal-go-login" style="font-size:12px">
+              ← Cambiar número de DNI o teléfono
+            </button>
+          </div>
+        ` : `
+          <div style="text-align:center;margin-bottom:20px">
+            <h2 style="font-size:20px;font-weight:700;color:#0f172a;margin-bottom:6px">Registro de Paciente</h2>
+            <p style="font-size:12.5px;color:#64748b">Crea tu ficha médica para acceder a tus turnos y recetas.</p>
+          </div>
+          <form data-form="portal-register" class="form-grid">
+            <div class="form-field">
+              <label for="reg-first">Nombre *</label>
+              <input id="reg-first" name="firstName" type="text" required placeholder="Tu nombre">
+            </div>
+            <div class="form-field">
+              <label for="reg-last">Apellido *</label>
+              <input id="reg-last" name="lastName" type="text" required placeholder="Tu apellido">
+            </div>
+            <div class="form-field">
+              <label for="reg-dni">DNI *</label>
+              <input id="reg-dni" name="dni" type="text" required value="${esc(S.portal.dniEntered || '')}" placeholder="Número de documento">
+            </div>
+            <div class="form-field">
+              <label for="reg-birth">Fecha de Nacimiento</label>
+              <input id="reg-birth" name="birthDate" type="date">
+            </div>
+            <div class="form-field">
+              <label for="reg-phone">Teléfono Celular *</label>
+              <input id="reg-phone" name="phone" type="tel" required value="${esc(S.portal.phoneEntered || '')}" placeholder="+54 9 11 ...">
+            </div>
+            <div class="form-field">
+              <label for="reg-email">Correo Electrónico</label>
+              <input id="reg-email" name="email" type="email" placeholder="tu@email.com">
+            </div>
+            <div class="form-field">
+              <label for="reg-cov">Obra Social / Cobertura *</label>
+              <input id="reg-cov" name="coverage" type="text" required placeholder="OSDE, Swiss Medical, Particular...">
+            </div>
+            <div class="form-field">
+              <label for="reg-aff">N° de Afiliado</label>
+              <input id="reg-aff" name="affiliateNumber" type="text" placeholder="Credencial médica">
+            </div>
+            <div class="form-error" role="alert" style="grid-column:1/-1"></div>
+            <div style="grid-column:1/-1;margin-top:10px">
+              <button class="btn primary wide" type="submit" style="min-height:44px;border-radius:10px;font-size:13px;font-weight:600;background:#1b4c37;width:100%">
+                Crear Ficha y Acceder al Portal ${icon('arrow', 14)}
+              </button>
+            </div>
+          </form>
+          <div style="margin-top:16px;text-align:center">
+            <button type="button" class="text-link muted" data-action="portal-go-login" style="font-size:12px">
+              ← Ya estoy registrado / Volver al inicio
+            </button>
+          </div>
+        `}
+
+        <div style="margin-top:24px;padding-top:16px;border-top:1px solid #f1f5f9;text-align:center">
+          <a href="/login" class="text-link muted" style="font-size:11.5px;display:inline-flex;align-items:center;gap:4px">
+            ${icon('lock', 12)} Acceso para Médicos y Personal Clínico →
+          </a>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function portalView() {
+  const p = S.portal.patient || {};
+  const d = S.portal.data || {};
+  const activeTab = S.portal.activeTab || 'inicio';
+  const appointments = d.appointments || [];
+  const prescriptions = d.prescriptions || [];
+  const invoices = d.invoices || [];
+  const records = d.records || [];
+  const consents = d.consents || [];
+  const upcoming = appointments.find(a => a.status === 'CONFIRMED' && new Date(a.startAt) >= new Date(Date.now() - 3600000));
+
+  $('#app').innerHTML = `
+    <div class="portal-shell">
+      <header class="portal-header">
+        <div class="portal-header-inner">
+          <div class="portal-brand-block">
+            <div class="brandmark" style="background:#2a6845;color:#d6f1be;width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center">
+              ${brandLogoSvg(18, '#d6f1be')}
+            </div>
+            <div>
+              <div style="font-size:15px;font-weight:700;color:#ffffff;line-height:1.2">abundance<span style="color:#8be1a8">.</span></div>
+              <span class="portal-badge-pill" style="font-size:8.5px;padding:2px 6px;background:rgba(214,241,190,0.15);color:#d6f1be;border-color:rgba(214,241,190,0.3)">PORTAL DEL PACIENTE</span>
+            </div>
+          </div>
+          <div class="portal-user-meta">
+            <div class="portal-avatar">${esc((p.firstName?.[0] || 'P') + (p.lastName?.[0] || ''))}</div>
+            <div class="portal-user-info">
+              <b style="color:#ffffff;font-size:13px;display:block">${esc(p.firstName || 'Paciente')} ${esc(p.lastName || '')}</b>
+              <span style="color:#a8c08d;font-size:11px">${esc(p.coverage || 'Particular')}${p.affiliateNumber ? ' · N° ' + esc(p.affiliateNumber) : ''}</span>
+            </div>
+            <button class="btn small dark" data-action="portal-logout" style="margin-left:8px;background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.2);color:#e2e8f0;font-size:11px">
+              Cerrar Sesión
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <nav class="portal-tabs-nav">
+        <div class="portal-tabs-inner">
+          <button class="portal-tab-btn ${activeTab === 'inicio' ? 'active' : ''}" data-action="portal-tab" data-tab="inicio">
+            ${icon('home', 15)} <span>Mi Resumen</span>
+          </button>
+          <button class="portal-tab-btn ${activeTab === 'turnos' ? 'active' : ''}" data-action="portal-tab" data-tab="turnos">
+            ${icon('calendar', 15)} <span>Turnos</span> <span class="nav-number" style="background:${activeTab === 'turnos' ? '#1b4c37' : '#e2e8f0'};color:${activeTab === 'turnos' ? '#fff' : '#475569'}">${appointments.filter(a => a.status === 'CONFIRMED').length}</span>
+          </button>
+          <button class="portal-tab-btn ${activeTab === 'recetas' ? 'active' : ''}" data-action="portal-tab" data-tab="recetas">
+            ${icon('file', 15)} <span>Recetas</span> <span class="nav-number" style="background:${activeTab === 'recetas' ? '#1b4c37' : '#e2e8f0'};color:${activeTab === 'recetas' ? '#fff' : '#475569'}">${prescriptions.length}</span>
+          </button>
+          <button class="portal-tab-btn ${activeTab === 'estudios' ? 'active' : ''}" data-action="portal-tab" data-tab="estudios">
+            ${icon('upload', 15)} <span>Estudios / Lab</span> <span class="nav-number" style="background:${activeTab === 'estudios' ? '#1b4c37' : '#e2e8f0'};color:${activeTab === 'estudios' ? '#fff' : '#475569'}">${records.length}</span>
+          </button>
+          <button class="portal-tab-btn ${activeTab === 'facturas' ? 'active' : ''}" data-action="portal-tab" data-tab="facturas">
+            ${icon('card', 15)} <span>Facturas ARCA</span> <span class="nav-number" style="background:${activeTab === 'facturas' ? '#1b4c37' : '#e2e8f0'};color:${activeTab === 'facturas' ? '#fff' : '#475569'}">${invoices.length}</span>
+          </button>
+          <button class="portal-tab-btn ${activeTab === 'consentimientos' ? 'active' : ''}" data-action="portal-tab" data-tab="consentimientos">
+            ${icon('shield', 15)} <span>Consentimientos</span> <span class="nav-number" style="background:${activeTab === 'consentimientos' ? '#1b4c37' : '#e2e8f0'};color:${activeTab === 'consentimientos' ? '#fff' : '#475569'}">${consents.length}</span>
+          </button>
+        </div>
+      </nav>
+
+      <main class="portal-content">
+        ${activeTab === 'inicio' ? portalTabInicio(p, d, upcoming)
+          : activeTab === 'turnos' ? portalTabTurnos(appointments, d)
+          : activeTab === 'recetas' ? portalTabRecetas(prescriptions)
+          : activeTab === 'estudios' ? portalTabEstudios(records)
+          : activeTab === 'facturas' ? portalTabFacturas(invoices)
+          : portalTabConsentimientos(consents)}
+      </main>
+
+      <footer class="portal-footer">
+        <p><b>${esc(d.clinic?.name || 'Abundance Clinic OS')}</b> · ${esc(d.clinic?.address || 'Sede Central')} · Tel: ${esc(d.clinic?.phone || '+54 11 4000-0000')}</p>
+        <p class="tiny muted" style="margin-top:4px">Portal seguro de salud conforme a la Ley de Derechos del Paciente N° 26.529 y Protección de Datos Personales N° 25.326.</p>
+      </footer>
+    </div>
+  `;
+}
+
+function portalTabInicio(p, d, upcoming) {
+  const prescriptions = d.prescriptions || [];
+  const records = d.records || [];
+  const invoices = d.invoices || [];
+
+  return `
+    <div class="portal-hero-box">
+      <div class="between" style="margin-bottom:12px">
+        <span class="portal-badge-pill">PRÓXIMO TURNO CLÍNICO</span>
+        ${upcoming ? `<span class="badge green">Confirmado</span>` : ''}
+      </div>
+      ${upcoming ? `
+        <h2 style="font-size:22px;color:#18362b;margin-bottom:6px;font-weight:700">
+          ${fmtDate(upcoming.startAt)} · ${fmtTime(upcoming.startAt)} hs
+        </h2>
+        <p style="font-size:13.5px;color:#334155;margin-bottom:16px;line-height:1.5">
+          Atención con <b>${esc(upcoming.doctorName || 'Profesional de salud')}</b> · ${esc(upcoming.type || 'Consulta Médica')} (${esc(upcoming.doctorSpecialty || 'Consultorio General')}).
+        </p>
+        <div class="flex" style="gap:10px;flex-wrap:wrap">
+          <button class="btn small primary" data-action="portal-open-booking" style="background:#1b4c37">${icon('calendar', 13)} Sacar Otro Turno</button>
+          <button class="btn small danger" data-action="portal-cancel-appointment" data-id="${upcoming.id}">Cancelar este Turno</button>
+        </div>
+      ` : `
+        <h2 style="font-size:20px;color:#18362b;margin-bottom:6px;font-weight:700">No tienes turnos próximos pendientes</h2>
+        <p style="font-size:13px;color:#64748b;margin-bottom:16px">Agenda una consulta médica o sesión de tratamiento en segundos sin esperas telefónicas.</p>
+        <button class="btn primary" data-action="portal-open-booking" style="background:#1b4c37">${icon('plus', 14)} Sacar Nuevo Turno</button>
+      `}
+    </div>
+
+    <!-- 4 Tarjetas de Acciones Rápidas -->
+    <div class="portal-actions-grid">
+      <div class="portal-action-card" data-action="portal-open-booking">
+        <div class="portal-action-icon">${icon('calendar', 22)}</div>
+        <b>Sacar Turno Online</b>
+        <span>Elige especialidad, médico y horario disponible</span>
+      </div>
+      <div class="portal-action-card" data-action="portal-tab" data-tab="recetas">
+        <div class="portal-action-icon">${icon('file', 22)}</div>
+        <b>Mis Recetas Médicas</b>
+        <span>${prescriptions.length} recetas oficiales en PDF con firma digital</span>
+      </div>
+      <div class="portal-action-card" data-action="portal-open-upload">
+        <div class="portal-action-icon">${icon('upload', 22)}</div>
+        <b>Subir Estudio / Lab</b>
+        <span>Adjunta análisis a tu historia clínica digital</span>
+      </div>
+      <div class="portal-action-card" data-action="portal-tab" data-tab="facturas">
+        <div class="portal-action-icon">${icon('card', 22)}</div>
+        <b>Mis Facturas ARCA</b>
+        <span>${invoices.length} comprobantes oficiales con CAE y QR</span>
+      </div>
+    </div>
+
+    <!-- Paneles Inferiores de Resumen -->
+    <div class="home-lower">
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Recetas Médicas Recientes</h2>
+          <button class="text-link" data-action="portal-tab" data-tab="recetas">Ver todas (${prescriptions.length}) →</button>
+        </div>
+        <div class="panel-body">
+          ${prescriptions.slice(0, 2).map(r => `
+            <div style="padding:12px;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:10px;background:#f8fafc">
+              <div class="between">
+                <b style="font-size:12.5px;color:#18362b">Receta Médica Electrónica Oficial</b>
+                <span class="tiny muted">${fmtDate(r.createdAt, true)}</span>
+              </div>
+              <p style="font-size:12px;color:#334155;margin:8px 0;white-space:pre-wrap">${esc(r.content)}</p>
+              <div style="margin-top:6px">
+                <a href="/api/prescriptions/${r.id}/document" target="_blank" class="text-link" style="font-size:12px;color:#1b4c37;font-weight:600">
+                  ${icon('download', 13)} Descargar Receta Oficial (PDF)
+                </a>
+              </div>
+            </div>
+          `).join('') || empty('Sin recetas recientes', 'Tus prescripciones médicas aparecerán aquí una vez emitidas.')}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Estudios y Archivos Médicos</h2>
+          <button class="btn small" data-action="portal-open-upload">${icon('plus', 12)} Subir estudio</button>
+        </div>
+        <div class="panel-body">
+          ${records.slice(0, 2).map(rec => `
+            <div style="padding:12px;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:10px;background:#f8fafc">
+              <div class="between">
+                <b style="font-size:12.5px;color:#18362b">${esc(rec.title || 'Estudio / Laboratorio')}</b>
+                <span class="badge blue">${esc(rec.specialty || 'General')}</span>
+              </div>
+              <div class="tiny muted" style="margin-top:4px">${fmtDate(rec.createdAt, true)} · Subido por: ${esc(rec.author)}</div>
+              ${rec.attachments && rec.attachments.length ? `
+                <div style="margin-top:8px">
+                  ${rec.attachments.map(att => `
+                    <button class="attachment-chip" data-action="view-attachment" data-url="${esc(att.data)}" data-name="${esc(att.name)}" data-type="${esc(att.type)}">
+                      ${icon('file', 12)} ${esc(att.name)}
+                    </button>
+                  `).join('')}
+                </div>
+              ` : ''}
+            </div>
+          `).join('') || empty('Sin estudios adjuntos', 'Puedes subir análisis o imágenes médicas para que tu profesional las evalúe.', btn('Subir estudio', 'portal-open-upload', 'upload', 'small primary'))}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function portalTabTurnos(appointments, d) {
+  const confirmed = appointments.filter(a => a.status === 'CONFIRMED' && new Date(a.startAt) >= new Date(Date.now() - 3600000));
+  const past = appointments.filter(a => !confirmed.includes(a));
+
+  return `
+    <div class="between" style="margin-bottom:20px;flex-wrap:wrap">
+      <div>
+        <h2 style="font-size:20px;font-weight:700;color:#18362b;margin:0 0 4px 0">Mis Turnos Médicos</h2>
+        <p style="font-size:13px;color:#64748b;margin:0">Gestiona tus consultas programadas y reserva nuevos turnos online.</p>
+      </div>
+      <button class="btn primary" data-action="portal-open-booking" style="background:#1b4c37">
+        ${icon('plus', 14)} Sacar Nuevo Turno
+      </button>
+    </div>
+
+    <section class="panel" style="margin-bottom:24px">
+      <div class="panel-header">
+        <h2>Próximos Turnos Confirmados</h2>
+        <span class="badge green">${confirmed.length} activos</span>
+      </div>
+      <div class="panel-body">
+        ${confirmed.map(a => `
+          <div class="portal-card">
+            <div class="portal-card-header">
+              <div>
+                <b style="font-size:16px;color:#18362b">${fmtDate(a.startAt)} · ${fmtTime(a.startAt)} hs</b>
+                <div style="font-size:13px;color:#334155;margin-top:3px">
+                  Profesional: <b>${esc(a.doctorName || 'Médico')}</b> (${esc(a.doctorSpecialty || 'General')})
+                </div>
+              </div>
+              <span class="badge green">Confirmado</span>
+            </div>
+            <div class="between" style="flex-wrap:wrap">
+              <span class="tiny muted">Motivo: ${esc(a.type || 'Consulta Médica')} ${a.notes ? '· ' + esc(a.notes) : ''}</span>
+              <div class="flex" style="gap:8px">
+                <button class="btn small danger" data-action="portal-cancel-appointment" data-id="${a.id}">
+                  Cancelar Turno
+                </button>
+              </div>
+            </div>
+          </div>
+        `).join('') || empty('Sin turnos próximos', 'No tienes turnos pendientes de atención.', btn('Sacar turno ahora', 'portal-open-booking', 'plus', 'small primary'))}
+      </div>
+    </section>
+
+    ${past.length ? `
+      <section class="panel">
+        <div class="panel-header"><h2>Historial de Turnos Anteriores</h2></div>
+        <div class="panel-body">
+          ${past.map(a => `
+            <div class="portal-card" style="opacity:0.85">
+              <div class="portal-card-header">
+                <div>
+                  <b style="font-size:14px;color:#334155">${fmtDate(a.startAt)} · ${fmtTime(a.startAt)} hs</b>
+                  <div style="font-size:12px;color:#64748b">${esc(a.doctorName || 'Médico')} · ${esc(a.type || 'Consulta')}</div>
+                </div>
+                ${badge(a.status)}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </section>
+    ` : ''}
+  `;
+}
+
+function portalTabRecetas(prescriptions) {
+  return `
+    <div style="margin-bottom:20px">
+      <h2 style="font-size:20px;font-weight:700;color:#18362b;margin:0 0 4px 0">Recetas Médicas Electrónicas</h2>
+      <p style="font-size:13px;color:#64748b;margin:0">Descarga tus recetas oficiales emitidas con firma digital profesional y QR de validez nacional.</p>
+    </div>
+
+    <section class="panel">
+      <div class="panel-body">
+        ${prescriptions.map(r => `
+          <div class="portal-card">
+            <div class="portal-card-header">
+              <div class="flex" style="gap:10px">
+                <div style="width:36px;height:36px;border-radius:8px;background:#f0fdf4;color:#166534;display:flex;align-items:center;justify-content:center">
+                  ${icon('file', 18)}
+                </div>
+                <div>
+                  <b style="font-size:14px;color:#18362b">Receta Médica Electrónica Oficial</b>
+                  <div class="tiny muted">${fmtDate(r.createdAt, true)}</div>
+                </div>
+              </div>
+              <span class="badge green">Válida para farmacias</span>
+            </div>
+            <p style="font-size:13px;color:#334155;white-space:pre-wrap;background:#f8fafc;padding:12px;border-radius:8px;border:1px solid #e2e8f0;margin:10px 0;line-height:1.6">
+              ${esc(r.content)}
+            </p>
+            <div class="between" style="margin-top:12px">
+              <span class="tiny muted">Firma Criptográfica SHA-256 e Integridad Legal</span>
+              <a href="/api/prescriptions/${r.id}/document" target="_blank" class="btn small primary" style="background:#1b4c37">
+                ${icon('download', 13)} Descargar Receta Oficial (PDF)
+              </a>
+            </div>
+          </div>
+        `).join('') || empty('Sin recetas médicas', 'Aún no se han emitido recetas electrónicas en tu historia clínica.')}
+      </div>
+    </section>
+  `;
+}
+
+function portalTabEstudios(records) {
+  return `
+    <div class="between" style="margin-bottom:20px;flex-wrap:wrap">
+      <div>
+        <h2 style="font-size:20px;font-weight:700;color:#18362b;margin:0 0 4px 0">Estudios Médicos y Análisis de Laboratorio</h2>
+        <p style="font-size:13px;color:#64748b;margin:0">Sube tus análisis y accede a los informes médicos alojados en tu ficha digital.</p>
+      </div>
+      <button class="btn primary" data-action="portal-open-upload" style="background:#1b4c37">
+        ${icon('upload', 14)} Subir Nuevo Estudio / Lab
+      </button>
+    </div>
+
+    <section class="panel">
+      <div class="panel-body">
+        ${records.map(rec => `
+          <div class="portal-card">
+            <div class="portal-card-header">
+              <div class="flex" style="gap:10px">
+                <div style="width:36px;height:36px;border-radius:8px;background:#eff6ff;color:#1d4ed8;display:flex;align-items:center;justify-content:center">
+                  ${icon('file', 18)}
+                </div>
+                <div>
+                  <b style="font-size:14px;color:#18362b">${esc(rec.title || 'Estudio Clínico')}</b>
+                  <div class="tiny muted">${fmtDate(rec.createdAt, true)} · Especialidad: ${esc(rec.specialty || 'General')}</div>
+                </div>
+              </div>
+              <span class="badge blue">${esc(rec.type || 'STUDY')}</span>
+            </div>
+            ${rec.notes ? `<p style="font-size:12.5px;color:#475569;margin:8px 0">${esc(rec.notes)}</p>` : ''}
+            ${rec.attachments && rec.attachments.length ? `
+              <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #e2e8f0">
+                <span class="tiny muted" style="display:block;margin-bottom:6px">Archivos adjuntos:</span>
+                ${rec.attachments.map(att => `
+                  <button class="attachment-chip" data-action="view-attachment" data-url="${esc(att.data)}" data-name="${esc(att.name)}" data-type="${esc(att.type)}">
+                    ${icon('download', 12)} Ver ${esc(att.name)} (${Math.round((att.size || 0)/1024)} KB)
+                  </button>
+                `).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `).join('') || empty('Sin estudios cargados', 'No tienes estudios registrados. Sube tu primer archivo para compartirlo con el médico.', btn('Subir estudio', 'portal-open-upload', 'upload', 'small primary'))}
+      </div>
+    </section>
+  `;
+}
+
+function portalTabFacturas(invoices) {
+  return `
+    <div style="margin-bottom:20px">
+      <h2 style="font-size:20px;font-weight:700;color:#18362b;margin:0 0 4px 0">Comprobantes Fiscales Oficiales (ARCA / AFIP)</h2>
+      <p style="font-size:13px;color:#64748b;margin:0">Descarga tus facturas electrónicas con CAE y código QR oficial para reintegros o deducciones.</p>
+    </div>
+
+    <section class="panel">
+      <div class="panel-body">
+        ${invoices.map(inv => `
+          <div class="portal-card">
+            <div class="portal-card-header">
+              <div>
+                <b style="font-size:15px;color:#18362b">Factura Oficial ${esc(inv.invoiceType || 'B')} N° ${esc(inv.invoiceNumber || inv.id)}</b>
+                <div class="tiny muted">${fmtDate(inv.createdAt, true)} · CAE: ${esc(inv.cae || 'Autorizado')}</div>
+              </div>
+              <span class="badge green">CAE Oficial ARCA</span>
+            </div>
+            <div class="between" style="margin-top:12px;flex-wrap:wrap">
+              <div>
+                <span class="tiny muted">Importe Total:</span>
+                <b style="font-size:16px;color:#166534;margin-left:6px">${fmtMoney(inv.amountCents || inv.totalCents || 0)}</b>
+              </div>
+              <a href="/api/invoices/${inv.id}/document" target="_blank" class="btn small primary" style="background:#1b4c37">
+                ${icon('download', 13)} Ver Factura Oficial con QR
+              </a>
+            </div>
+          </div>
+        `).join('') || empty('Sin facturas emitidas', 'Aquí aparecerán los comprobantes fiscales una vez autorizados.')}
+      </div>
+    </section>
+  `;
+}
+
+function portalTabConsentimientos(consents) {
+  return `
+    <div style="margin-bottom:20px">
+      <h2 style="font-size:20px;font-weight:700;color:#18362b;margin:0 0 4px 0">Consentimientos Informados Digitales</h2>
+      <p style="font-size:13px;color:#64748b;margin:0">Documentos legales bilaterales con firma digital conforme a la Ley N° 26.529.</p>
+    </div>
+
+    <section class="panel">
+      <div class="panel-body">
+        ${consents.map(c => `
+          <div class="portal-card">
+            <div class="portal-card-header">
+              <div>
+                <b style="font-size:14px;color:#18362b">${esc(c.title)}</b>
+                <div class="tiny muted">Profesional: ${esc(c.doctorName)} · Tipo: ${esc(c.type)}</div>
+              </div>
+              <span class="badge green">Firmado Digitalmente</span>
+            </div>
+            <div class="tiny muted" style="margin-top:8px">Firmado el: ${fmtDate(c.signedAt || c.createdAt)}</div>
+          </div>
+        `).join('') || empty('Sin consentimientos', 'No tienes consentimientos pendientes de firma.')}
+      </div>
+    </section>
+  `;
+}
+
+function portalBookingDialog() {
+  const d = S.portal.data || {};
+  const doctors = d.doctors || [];
+  const agendas = d.agendas || [];
+
+  showModal(
+    'Sacar Nuevo Turno Online',
+    'Elige el profesional, la especialidad y el horario de tu preferencia.',
+    `<form data-form="portal-booking">
+      <div class="form-grid">
+        ${selectField('Profesional Médico *', 'doctorId', doctors.map(doc => [doc.id, `${doc.name} (${doc.specialty})`]), doctors[0]?.id, true)}
+        ${selectField('Servicio / Agenda *', 'agendaId', (agendas.length ? agendas : [{ id: 'default', name: 'Consultorio General' }]).map(ag => [ag.id, ag.name]), agendas[0]?.id || 'default')}
+        ${selectField('Tipo de Consulta *', 'type', [
+          ['Consulta Médica', 'Consulta Médica'],
+          ['Control / Seguimiento', 'Control / Seguimiento'],
+          ['Procedimiento / Sesión', 'Procedimiento / Sesión'],
+          ['Telemedicina / Videoconsulta', 'Telemedicina / Videoconsulta']
+        ], 'Consulta Médica')}
+        ${field('Fecha del Turno *', 'date', 'date', plusDays(dateKey(), 1), 'required')}
+        ${selectField('Horario Disponible *', 'time', [
+          ['09:00', '09:00 hs'],
+          ['09:30', '09:30 hs'],
+          ['10:00', '10:00 hs'],
+          ['10:30', '10:30 hs'],
+          ['11:00', '11:00 hs'],
+          ['11:30', '11:30 hs'],
+          ['14:00', '14:00 hs'],
+          ['14:30', '14:30 hs'],
+          ['15:00', '15:00 hs'],
+          ['15:30', '15:30 hs'],
+          ['16:00', '16:00 hs'],
+          ['16:30', '16:30 hs'],
+          ['17:00', '17:00 hs']
+        ], '10:00')}
+        ${area('Motivo de consulta (opcional)', 'notes', '', 'maxlength="300" placeholder="Describe brevemente tus síntomas o motivo de atención..."')}
+      </div>
+      <div class="form-error" role="alert"></div>
+      <div class="dialog-actions">
+        ${btn('Cancelar', 'close-modal', '', '', 'type="button"')}
+        <button class="btn primary" type="submit" style="background:#1b4c37">${icon('check', 15)} Confirmar Turno</button>
+      </div>
+    </form>`,
+    '', 'wide'
+  );
+}
+
+function portalUploadDialog() {
+  showModal(
+    'Subir Estudio, Laboratorio o Archivo Médico',
+    'El archivo se guardará directamente en tu historia clínica para que lo evalúe el equipo médico.',
+    `<form data-form="portal-upload-study">
+      <div class="form-grid">
+        ${field('Título / Nombre del Estudio *', 'title', 'text', '', 'required placeholder="Ej: Laboratorio Completo, Ecografía Abdominal..."', true)}
+        ${selectField('Tipo de Estudio *', 'studyType', [
+          ['LAB', 'Laboratorio / Análisis Bioquímico'],
+          ['STUDY', 'Estudio de Imágenes (Ecografía, Rayos, Resonancia)'],
+          ['DOCUMENT', 'Informe Médico Externo / Certificado']
+        ], 'LAB')}
+        ${field('Especialidad', 'specialty', 'text', 'Bioquímica / Imágenes', 'placeholder="Ej: Bioquímica, Cardiología"')}
+        <div class="form-field full">
+          <label>Seleccionar Archivo (PDF, JPG, PNG) *</label>
+          <input type="file" id="portal-file-picker" required accept=".pdf,.png,.jpg,.jpeg">
+          <div id="portal-file-info" class="tiny muted" style="margin-top:4px">Puedes adjuntar el informe o foto del análisis.</div>
+          <input type="hidden" name="attachmentPayload" id="portal-attachment-payload">
+        </div>
+        <div class="form-field full">
+          <label for="portal-notes">Observaciones para el médico</label>
+          <textarea id="portal-notes" name="notes" class="input" style="height:70px" placeholder="Comentarios adicionales sobre el estudio..."></textarea>
+        </div>
+      </div>
+      <div class="form-error" role="alert"></div>
+      <div class="dialog-actions">
+        ${btn('Cancelar', 'close-modal', '', '', 'type="button"')}
+        <button class="btn primary" type="submit" style="background:#1b4c37">${icon('upload', 15)} Subir y Guardar</button>
+      </div>
+    </form>`,
+    '', 'wide'
+  );
+
+  setTimeout(() => {
+    $('#portal-file-picker')?.addEventListener('change', e => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const payload = JSON.stringify([{
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          data: ev.target.result,
+          uploadedAt: new Date().toISOString()
+        }]);
+        if ($('#portal-attachment-payload')) $('#portal-attachment-payload').value = payload;
+        if ($('#portal-file-info')) $('#portal-file-info').innerHTML = `✓ Archivo listo: <b>${esc(file.name)}</b> (${Math.round(file.size / 1024)} KB)`;
+      };
+      reader.readAsDataURL(file);
+    });
+  }, 50);
+}
+
 function render() {
+  if (S.view === 'portal' || location.pathname.startsWith('/portal')) {
+    return portalPage();
+  }
   if (!S.session) return loginPage();
   shell();
 }
@@ -3236,6 +4380,15 @@ function settingsView() {
 // ==========================================
 
 async function navigate(view, push = true) {
+  if (view === 'portal') {
+    S.view = 'portal';
+    S.mobile = false;
+    if (!PREVIEW && push) history.pushState({}, '', paths[view] || '/portal');
+    if (S.portal?.token && !S.portal?.data) await refreshPortal();
+    render();
+    window.scrollTo(0, 0);
+    return;
+  }
   const isAdmin = S.session?.user?.role === 'SUPER_ADMIN';
   if (isAdmin && !S.supportMode && !['admin', 'integrations', 'audit', 'settings'].includes(view)) {
     view = 'admin';
@@ -4896,6 +6049,47 @@ document.addEventListener('click', async e => {
         }
         break;
       }
+      // Portal del Paciente
+      case 'portal-go-register': {
+        S.portal.step = 'register';
+        render();
+        break;
+      }
+      case 'portal-go-login': {
+        S.portal.step = 'dni';
+        render();
+        break;
+      }
+      case 'portal-logout': {
+        localStorage.removeItem('portal_token');
+        S.portal = { token: null, patient: null, data: null, activeTab: 'inicio', step: 'dni' };
+        toast('Sesión cerrada.');
+        render();
+        break;
+      }
+      case 'portal-tab': {
+        S.portal.activeTab = el.dataset.tab;
+        render();
+        break;
+      }
+      case 'portal-open-booking': {
+        portalBookingDialog();
+        break;
+      }
+      case 'portal-open-upload': {
+        portalUploadDialog();
+        break;
+      }
+      case 'portal-cancel-appointment': {
+        if (confirm('¿Confirmas que deseas cancelar este turno?')) {
+          el.disabled = true;
+          await api('/api/portal/appointments/' + id + '/cancel', 'POST', {});
+          toast('Turno cancelado exitosamente.');
+          await refreshPortal();
+          render();
+        }
+        break;
+      }
     }
   } catch (err) {
     toast(err.message, true);
@@ -5193,6 +6387,58 @@ document.addEventListener('submit', async e => {
         toast('Si el correo está registrado en la base de datos, enviamos las instrucciones de acceso a tu casilla.');
         return;
       }
+      case 'portal-request-code': {
+        const res = await api('/api/portal/auth/request-otp', 'POST', b);
+        S.portal.dniEntered = b.dni;
+        S.portal.phoneEntered = b.phone;
+        S.portal.phoneMasked = res.maskedPhone;
+        S.portal.demoCode = res.demoCode;
+        S.portal.step = 'otp';
+        toast('Código de verificación enviado por WhatsApp.');
+        render();
+        return;
+      }
+      case 'portal-verify-code': {
+        const res = await api('/api/portal/auth/verify-otp', 'POST', {
+          dni: S.portal.dniEntered,
+          code: b.code
+        });
+        S.portal.token = res.token;
+        S.portal.patient = res.patient;
+        localStorage.setItem('portal_token', res.token);
+        await refreshPortal();
+        toast('¡Bienvenido/a, ' + (res.patient?.firstName || '') + '!');
+        render();
+        return;
+      }
+      case 'portal-register': {
+        const res = await api('/api/portal/auth/register', 'POST', b);
+        S.portal.token = res.token;
+        S.portal.patient = res.patient;
+        localStorage.setItem('portal_token', res.token);
+        await refreshPortal();
+        toast('Registro completado. ¡Bienvenido/a a tu portal de salud!');
+        render();
+        return;
+      }
+      case 'portal-booking': {
+        await api('/api/portal/appointments', 'POST', b);
+        closeModal();
+        toast('¡Turno reservado con éxito!');
+        await refreshPortal();
+        S.portal.activeTab = 'turnos';
+        render();
+        return;
+      }
+      case 'portal-upload-study': {
+        await api('/api/portal/upload-study', 'POST', b);
+        closeModal();
+        toast('Estudio subido correctamente a tu historia clínica.');
+        await refreshPortal();
+        S.portal.activeTab = 'estudios';
+        render();
+        return;
+      }
     }
 
     await refresh();
@@ -5321,6 +6567,12 @@ document.addEventListener('keydown', e => {
 });
 
 window.addEventListener('popstate', () => {
+  if (location.pathname.startsWith('/portal')) {
+    S.view = 'portal';
+    closeModal();
+    render();
+    return;
+  }
   if (!S.session) return;
   const isAdmin = S.session.user.role === 'SUPER_ADMIN';
   S.view = Object.keys(paths).find(k => paths[k] === location.pathname) || (isAdmin ? 'admin' : 'home');
@@ -5456,6 +6708,17 @@ async function boot() {
       return;
     }
     renderSetPasswordView(accessToken, tokenType, hashParams.get('refresh_token'));
+    return;
+  }
+
+  if (location.pathname.startsWith('/portal')) {
+    S.view = 'portal';
+    const pTok = localStorage.getItem('portal_token');
+    if (pTok) {
+      S.portal.token = pTok;
+      try { await refreshPortal(); } catch {}
+    }
+    render();
     return;
   }
 

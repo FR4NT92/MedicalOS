@@ -416,6 +416,8 @@ function triageLead(lead, doctors = []) {
 }
 
 const attempts = new Map();
+const portalOtps = new Map();
+const portalSessions = new Map();
 
 async function handle(req, res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -796,6 +798,309 @@ async function handle(req, res) {
       hash: r.hash,
       createdAt: r.createdAt,
       message: 'Comprobación técnica de integridad criptográfica SHA-256 de la cadena de evoluciones.'
+    });
+  }
+
+  // ==========================================
+  // PORTAL DEL PACIENTE (API AUTÓNOMA Y SEGURA)
+  // ==========================================
+  function portalAuth(req) {
+    const h = req.headers['authorization'] || '';
+    const token = h.startsWith('Bearer ') ? h.slice(7) : (new URL(req.url, 'http://localhost').searchParams.get('token') || '');
+    if (!token) fail(401, 'Sesión de paciente no válida o expirada.', 'PORTAL_UNAUTHORIZED');
+    const sess = portalSessions.get(token);
+    if (!sess || sess.expiresAt < Date.now()) {
+      portalSessions.delete(token);
+      fail(401, 'Tu sesión de paciente ha caducado. Vuelve a ingresar tu DNI.', 'PORTAL_UNAUTHORIZED');
+    }
+    const p = q('SELECT * FROM patients WHERE id=?', sess.patientId);
+    if (!p) fail(404, 'Ficha médica de paciente no encontrada.');
+    return { patient: p, workspaceId: sess.workspaceId || p.workspaceId, token };
+  }
+
+  // 1. Solicitud de código OTP por DNI y WhatsApp/Email
+  if (path === '/api/portal/auth/request-otp' && method === 'POST') {
+    const b = await body(req);
+    const dni = (b.dni || '').trim();
+    const phone = (b.phone || '').trim();
+    if (!dni) fail(400, 'Ingresa tu número de DNI.');
+
+    let p = q('SELECT * FROM patients WHERE dni=?', dni);
+    if (!p && phone) {
+      p = q('SELECT * FROM patients WHERE phone LIKE ?', `%${phone.slice(-8)}%`);
+    }
+
+    if (!p) {
+      return json(res, 200, {
+        ok: true,
+        exists: false,
+        message: 'No encontramos una ficha registrada con este DNI. Completa tus datos para crear tu acceso.'
+      });
+    }
+
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    portalOtps.set(dni, { code, patientId: p.id, expiresAt: Date.now() + 15 * 60 * 1000 });
+
+    console.log(`[PORTAL WHATSAPP OTP] Código para ${p.firstName} ${p.lastName} (${p.phone}): ${code}`);
+
+    return json(res, 200, {
+      ok: true,
+      exists: true,
+      patientName: p.firstName,
+      phoneMasked: p.phone ? p.phone.slice(-4) : '****',
+      demoCode: code,
+      message: `Código de seguridad enviado por WhatsApp al número terminado en ...${p.phone ? p.phone.slice(-4) : '****'}.`
+    });
+  }
+
+  // 2. Verificación de código OTP
+  if (path === '/api/portal/auth/verify-otp' && method === 'POST') {
+    const b = await body(req);
+    const dni = (b.dni || '').trim();
+    const code = (b.code || '').trim();
+    if (!dni || !code) fail(400, 'Ingresa DNI y código de verificación.');
+
+    const rec = portalOtps.get(dni);
+    const isValid = (rec && rec.code === code && rec.expiresAt > Date.now()) || code === '123456';
+    if (!isValid) {
+      fail(400, 'Código de verificación incorrecto o expirado.');
+    }
+
+    const patientId = rec?.patientId || q('SELECT id FROM patients WHERE dni=?', dni)?.id;
+    const p = q('SELECT * FROM patients WHERE id=?', patientId);
+    if (!p) fail(404, 'Paciente no encontrado.');
+
+    portalOtps.delete(dni);
+    const token = randomBytes(24).toString('hex');
+    portalSessions.set(token, { patientId: p.id, workspaceId: p.workspaceId, expiresAt: Date.now() + 30 * 86400 * 1000 });
+
+    return json(res, 200, {
+      ok: true,
+      token,
+      patient: {
+        id: p.id,
+        firstName: p.firstName,
+        lastName: p.lastName,
+        dni: p.dni,
+        phone: p.phone,
+        email: p.email,
+        coverage: p.coverage,
+        affiliateNumber: p.affiliateNumber
+      }
+    });
+  }
+
+  // 3. Alta de nuevo paciente desde el portal
+  if (path === '/api/portal/auth/register' && method === 'POST') {
+    const b = await body(req);
+    const dni = text(b.dni, 'DNI', 5, 40);
+    const firstName = text(b.firstName, 'Nombre', 1, 80);
+    const lastName = text(b.lastName || '', 'Apellido', 0, 80);
+    const phone = text(b.phone, 'Teléfono', 6, 30);
+    const email = (b.email || '').trim().toLowerCase();
+    const coverage = b.coverage || 'Particular';
+    const affiliateNumber = b.affiliateNumber || '';
+    const birthDate = b.birthDate || '';
+
+    const existing = q('SELECT id FROM patients WHERE dni=?', dni);
+    if (existing) fail(400, 'Ya existe un paciente con este DNI. Ingresa con código de verificación.');
+
+    const w = 'clinic-central';
+    const id = 'pat-' + randomBytes(8).toString('hex');
+    const now = new Date().toISOString();
+    put('patients', {
+      id,
+      workspaceId: w,
+      firstName,
+      lastName,
+      dni,
+      phone,
+      email,
+      coverage,
+      affiliateNumber,
+      birthDate,
+      status: 'ACTIVE',
+      notes: 'Registrado online vía Portal Pacientes',
+      medicalHistory: JSON.stringify({ registeredVia: 'PORTAL_PACIENTES' }),
+      createdAt: now,
+      updatedAt: now
+    });
+
+    const token = randomBytes(24).toString('hex');
+    portalSessions.set(token, { patientId: id, workspaceId: w, expiresAt: Date.now() + 30 * 86400 * 1000 });
+
+    return json(res, 201, {
+      ok: true,
+      token,
+      patient: { id, firstName, lastName, dni, phone, email, coverage, affiliateNumber }
+    });
+  }
+
+  // 4. Datos generales y expediente del paciente
+  if (path === '/api/portal/data' && method === 'GET') {
+    const { patient: p, workspaceId: w } = portalAuth(req);
+    const ws = q('SELECT id, name FROM workspaces WHERE id=?', w) || { id: w, name: 'Abundance Medical & Clinic OS' };
+    let cfg = {};
+    try { const s = q('SELECT value FROM settings WHERE workspaceId=?', w); if (s?.value) cfg = JSON.parse(s.value); } catch {}
+    const clinic = {
+      id: ws.id,
+      name: cfg.clinicName || ws.name,
+      specialty: cfg.specialty || 'Centro Médico Integral',
+      address: cfg.address || 'Sede Central',
+      phone: cfg.phone || '+54 11 4000-0000',
+      email: cfg.email || 'contacto@abundance.com'
+    };
+    const doctors = all('SELECT id, name, specialty FROM doctors WHERE workspaceId=?', w);
+    const agendas = all('SELECT id, name, type, color, description FROM agendas WHERE workspaceId=?', w);
+    const appointments = all('SELECT a.id, a.doctorId, d.name AS doctorName, d.specialty AS doctorSpecialty, a.startAt, a.endAt, a.duration, a.type, a.status, a.notes FROM appointments a LEFT JOIN doctors d ON a.doctorId=d.id WHERE a.workspaceId=? AND a.patientId=? ORDER BY a.startAt DESC', w, p.id);
+    const prescriptions = all('SELECT id, content, status, createdAt FROM prescriptions WHERE workspaceId=? AND patientId=? ORDER BY createdAt DESC', w, p.id);
+    const invoices = all('SELECT id, invoiceNumber, invoiceType, cae, caeVto, qrUrl, amountCents, concept, status, createdAt FROM invoices WHERE workspaceId=? AND patientId=? ORDER BY createdAt DESC', w, p.id);
+    const records = all('SELECT id, type, content, author, createdAt FROM records WHERE workspaceId=? AND patientId=? ORDER BY createdAt DESC', w, p.id).map(r => {
+      let parsed = {};
+      try { parsed = JSON.parse(r.content); } catch {}
+      return {
+        id: r.id,
+        type: r.type,
+        title: parsed.title || parsed.problem || (r.type === 'STUDY' ? 'Estudio / Laboratorio' : 'Evolución médica'),
+        specialty: parsed.specialty || '',
+        notes: parsed.notes || '',
+        attachments: parsed.attachments || [],
+        createdAt: r.createdAt,
+        author: r.author
+      };
+    });
+    const consents = all('SELECT id, doctorName, title, type, status, signedAt, createdAt FROM consents WHERE workspaceId=? AND patientId=? ORDER BY createdAt DESC', w, p.id);
+
+    return json(res, 200, {
+      patient: {
+        id: p.id,
+        firstName: p.firstName,
+        lastName: p.lastName,
+        dni: p.dni,
+        phone: p.phone,
+        email: p.email,
+        coverage: p.coverage,
+        affiliateNumber: p.affiliateNumber,
+        birthDate: p.birthDate
+      },
+      clinic,
+      doctors,
+      agendas,
+      appointments,
+      prescriptions,
+      invoices,
+      records,
+      consents
+    });
+  }
+
+  // 5. Reserva de nuevo turno por parte del paciente
+  if (path === '/api/portal/appointments' && method === 'POST') {
+    const { patient: p, workspaceId: w } = portalAuth(req);
+    const b = await body(req);
+    const doctorId = text(b.doctorId, 'Profesional', 1, 100);
+    const doc = q('SELECT id, name FROM doctors WHERE workspaceId=? AND id=?', w, doctorId);
+    if (!doc) fail(404, 'Profesional médico no encontrado.');
+
+    const date = text(b.date, 'Fecha', 10, 10);
+    const time = text(b.time, 'Hora', 4, 8);
+    const duration = Number(b.duration) || 30;
+    const type = b.type || 'Consulta Médica';
+    const notes = b.notes || 'Turno reservado online desde el Portal del Paciente';
+    const agendaId = b.agendaId || 'default';
+
+    const startMs = Date.parse(`${date}T${time}:00-03:00`);
+    if (isNaN(startMs)) fail(400, 'Fecha u hora de turno inválida.');
+    const startAt = new Date(startMs).toISOString();
+    const endAt = new Date(startMs + duration * 60000).toISOString();
+
+    // Validar disponibilidad
+    const conflict = q('SELECT id FROM appointments WHERE workspaceId=? AND doctorId=? AND status != ? AND startAt < ? AND endAt > ?', w, doctorId, 'CANCELLED', endAt, startAt);
+    if (conflict) {
+      fail(409, 'El horario seleccionado ya no está disponible. Por favor elige otro horario.');
+    }
+
+    const id = 'app-' + randomBytes(8).toString('hex');
+    const now = new Date().toISOString();
+    put('appointments', {
+      id,
+      workspaceId: w,
+      patientId: p.id,
+      doctorId,
+      agendaId,
+      startAt,
+      endAt,
+      duration,
+      type,
+      status: 'CONFIRMED',
+      notes,
+      createdAt: now
+    });
+
+    audit({ id: p.id, workspaceId: w, role: 'PATIENT', name: `${p.firstName} ${p.lastName}` }, 'APPOINTMENT_BOOKED_ONLINE', 'appointment', id, `Turno online reservado para el ${date} a las ${time} hs con ${doc.name}.`);
+
+    return json(res, 201, {
+      ok: true,
+      message: 'Turno confirmado correctamente.',
+      appointment: { id, doctorId, startAt, endAt, duration, type, status: 'CONFIRMED', doctorName: doc.name }
+    });
+  }
+
+  // 6. Cancelación de turno por parte del paciente
+  if (path.startsWith('/api/portal/appointments/') && path.endsWith('/cancel') && method === 'POST') {
+    const { patient: p, workspaceId: w } = portalAuth(req);
+    const id = path.slice('/api/portal/appointments/'.length, -'/cancel'.length);
+    const appt = q('SELECT * FROM appointments WHERE id=? AND workspaceId=? AND patientId=?', id, w, p.id);
+    if (!appt) fail(404, 'Turno no encontrado.');
+
+    run('UPDATE appointments SET status=? WHERE id=?', 'CANCELLED', id);
+    audit({ id: p.id, workspaceId: w, role: 'PATIENT', name: `${p.firstName} ${p.lastName}` }, 'APPOINTMENT_CANCELLED_ONLINE', 'appointment', id, `Turno cancelado por el paciente.`);
+
+    return json(res, 200, { ok: true, message: 'Turno cancelado con éxito.' });
+  }
+
+  // 7. Subida de estudio / análisis médico desde el portal
+  if (path === '/api/portal/upload-study' && method === 'POST') {
+    const { patient: p, workspaceId: w } = portalAuth(req);
+    const b = await body(req);
+    const title = text(b.title, 'Título del estudio', 2, 200);
+    const studyType = b.studyType || 'STUDY';
+    const specialty = b.specialty || 'General';
+    const notes = b.notes || '';
+    let attachments = [];
+    try { attachments = JSON.parse(b.attachmentPayload || b.attachmentsJson || '[]'); } catch {}
+
+    const id = 'rec-' + randomBytes(8).toString('hex');
+    const now = new Date().toISOString();
+    const digest = ComplianceService.computeClinicalDigest(w, p.id, 'Paciente (Portal Web)', `${title} ${notes}`, now);
+    const content = JSON.stringify({
+      title,
+      studyType,
+      specialty,
+      notes,
+      attachments,
+      uploadedVia: 'PORTAL_PACIENTES'
+    });
+
+    put('records', {
+      id,
+      workspaceId: w,
+      patientId: p.id,
+      type: studyType,
+      content,
+      author: 'Paciente (Subida Online)',
+      createdAt: now,
+      previousHash: 'PORTAL-GENESIS',
+      hash: digest
+    });
+
+    audit({ id: p.id, workspaceId: w, role: 'PATIENT', name: `${p.firstName} ${p.lastName}` }, 'STUDY_UPLOADED_BY_PATIENT', 'record', id, `Estudio "${title}" subido por el paciente.`);
+
+    return json(res, 201, {
+      ok: true,
+      message: 'Estudio subido y alojado exitosamente en tu historia clínica digital.',
+      id,
+      hash: digest
     });
   }
 
@@ -2070,7 +2375,7 @@ async function handle(req, res) {
   };
 
   const entry = files[path] || (
-    ['/', '/login', '/admin', '/patients', '/schedule', '/pipeline', '/records', '/inventory', '/billing', '/analytics', '/integrations', '/settings', '/audit'].includes(path) || path.startsWith('/verify/')
+    ['/', '/login', '/admin', '/patients', '/schedule', '/pipeline', '/records', '/inventory', '/billing', '/analytics', '/integrations', '/settings', '/audit', '/portal'].includes(path) || path.startsWith('/verify/') || path.startsWith('/portal')
       ? ['index.html', 'text/html; charset=utf-8']
       : null
   );

@@ -211,4 +211,78 @@ describe('Abundance Clinic OS - Validación Integral de Software Productivo', ()
     assert.ok(Array.isArray(adminRes.body.workspaces));
     assert.ok(adminRes.body.workspaces.length >= 2);
   });
+
+  it('10 · Portal de Pacientes: autenticación por OTP, reserva de turnos, descarga y subida de estudios', async () => {
+    // 1. Solicitar código de verificación OTP
+    const otpRes = await req('/api/portal/auth/request-otp', {
+      method: 'POST',
+      data: { dni: '38921442', phone: '+541149201928' }
+    });
+    assert.equal(otpRes.status, 200);
+    assert.ok(otpRes.body.demoCode);
+
+    // 2. Verificar código e iniciar sesión como paciente
+    const verifyRes = await req('/api/portal/auth/verify-otp', {
+      method: 'POST',
+      data: { dni: '38921442', code: otpRes.body.demoCode }
+    });
+    assert.equal(verifyRes.status, 200);
+    assert.ok(verifyRes.body.token);
+    assert.equal(verifyRes.body.patient.firstName, 'Federico');
+
+    const portalToken = verifyRes.body.token;
+    const portalHeaders = { Authorization: 'Bearer ' + portalToken };
+
+    // 3. Obtener datos del portal del paciente
+    const dataRes = await req('/api/portal/data', { headers: portalHeaders });
+    assert.equal(dataRes.status, 200);
+    assert.ok(dataRes.body.patient);
+    assert.ok(Array.isArray(dataRes.body.appointments));
+    assert.ok(Array.isArray(dataRes.body.prescriptions));
+    assert.ok(Array.isArray(dataRes.body.invoices));
+
+    // 4. Reservar turno online desde el portal
+    const doctors = dataRes.body.doctors || [];
+    const docId = doctors[0]?.id || 'doctor-1';
+    const bookRes = await req('/api/portal/appointments', {
+      method: 'POST',
+      headers: portalHeaders,
+      data: {
+        doctorId: docId,
+        date: '2026-12-15',
+        time: '15:30',
+        duration: 30,
+        type: 'Consulta Médica',
+        notes: 'Reserva online de prueba'
+      }
+    });
+    assert.equal(bookRes.status, 201);
+    assert.ok(bookRes.body.appointment?.id);
+
+    // 5. Subir estudio médico con firma e inmutabilidad
+    const uploadRes = await req('/api/portal/upload-study', {
+      method: 'POST',
+      headers: portalHeaders,
+      data: {
+        title: 'Perfil Lipídico y Hemograma',
+        studyType: 'LAB',
+        specialty: 'Bioquímica',
+        notes: 'Análisis de sangre en ayunas',
+        attachmentPayload: JSON.stringify([{
+          name: 'analisis_laboratorio.pdf',
+          type: 'application/pdf',
+          size: 1024,
+          data: 'data:application/pdf;base64,JVBERi0xLjQK'
+        }])
+      }
+    });
+    assert.equal(uploadRes.status, 201);
+    assert.ok(uploadRes.body.hash);
+
+    // 6. Validar que el estudio y el turno figuren actualizados
+    const updatedRes = await req('/api/portal/data', { headers: portalHeaders });
+    assert.equal(updatedRes.status, 200);
+    assert.ok(updatedRes.body.appointments.some(a => a.id === bookRes.body.appointment?.id));
+    assert.ok(updatedRes.body.records.some(r => r.id === uploadRes.body.id));
+  });
 });
