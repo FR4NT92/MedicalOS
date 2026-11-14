@@ -14,6 +14,7 @@ const paths = {
   patients: '/patients',
   schedule: '/schedule',
   pipeline: '/pipeline',
+  hospitalDay: '/hospital-day',
   records: '/records',
   staff: '/staff',
   inventory: '/inventory',
@@ -31,6 +32,7 @@ const titles = {
   patients: 'Pacientes',
   schedule: 'Agenda',
   pipeline: 'Seguimiento',
+  hospitalDay: 'Hospital de Día',
   records: 'Historia clínica',
   staff: 'Equipo y Personal',
   inventory: 'Inventario de Insumos',
@@ -1269,6 +1271,7 @@ function shell() {
             navItem('schedule', 'calendar', activeDay().length) +
             navItem('patients', 'users') +
             navItem('pipeline', 'pipeline', (d?.leads || []).filter(l => l.status === 'NEW').length) +
+            navItem('hospitalDay', 'activity', (d?.medicalOrders || []).filter(o => o.status === 'PENDING' || o.status === 'IN_PROGRESS').length) +
             navItem('records', 'file') +
             navItem('staff', 'usercheck', (d?.staff || []).length || (d?.doctors || []).length) +
             navItem('inventory', 'box', (d?.inventory || []).filter(i => i.quantity <= i.minQuantity).length) +
@@ -1335,6 +1338,7 @@ function content() {
     patients: patientsView,
     schedule: scheduleView,
     pipeline: pipelineView,
+    hospitalDay: hospitalDayView,
     records: recordsView,
     staff: staffView,
     inventory: inventoryView,
@@ -1580,35 +1584,35 @@ function portalView() {
 }
 
 function portalTabInicio(p, d, upcoming) {
-  const prescriptions = d.prescriptions || [];
-  const records = d.records || [];
-  const invoices = d.invoices || [];
+  const clinic = d.clinic || {};
 
   return `
     <div class="portal-hero-box">
-      <div class="between" style="margin-bottom:12px">
-        <span class="portal-badge-pill">PRÓXIMO TURNO CLÍNICO</span>
-        ${upcoming ? `<span class="badge green">Confirmado</span>` : ''}
+      <div class="between" style="margin-bottom:10px">
+        <span class="portal-badge-pill">${upcoming ? 'TU PRÓXIMA CITA MÉDICA' : 'PORTAL DEL PACIENTE'}</span>
+        ${upcoming ? `<span class="badge green" style="background:#8be1a8;color:#0d281e;font-weight:700">Confirmado</span>` : `<span style="font-size:11px;color:#a8c08d">Ficha Digital Activa</span>`}
       </div>
       ${upcoming ? `
-        <h2 style="font-size:22px;color:#18362b;margin-bottom:6px;font-weight:700">
+        <h2 style="font-size:22px;color:#ffffff;margin-bottom:6px;font-weight:700">
           ${fmtDate(upcoming.startAt)} · ${fmtTime(upcoming.startAt)} hs
         </h2>
-        <p style="font-size:13.5px;color:#334155;margin-bottom:16px;line-height:1.5">
+        <p style="font-size:13.5px;color:#d6f1be;margin-bottom:14px;line-height:1.5">
           Atención con <b>${esc(upcoming.doctorName || 'Profesional de salud')}</b> · ${esc(upcoming.type || 'Consulta Médica')} (${esc(upcoming.doctorSpecialty || 'Consultorio General')}).
         </p>
-        <div class="flex" style="gap:10px;flex-wrap:wrap">
-          <button class="btn small primary" data-action="portal-open-booking" style="background:#1b4c37">${icon('calendar', 13)} Sacar Otro Turno</button>
+        <div>
           <button class="btn small danger" data-action="portal-cancel-appointment" data-id="${upcoming.id}">Cancelar este Turno</button>
         </div>
       ` : `
-        <h2 style="font-size:20px;color:#18362b;margin-bottom:6px;font-weight:700">No tienes turnos próximos pendientes</h2>
-        <p style="font-size:13px;color:#64748b;margin-bottom:16px">Agenda una consulta médica o sesión de tratamiento en segundos sin esperas telefónicas.</p>
-        <button class="btn primary" data-action="portal-open-booking" style="background:#1b4c37">${icon('plus', 14)} Sacar Nuevo Turno</button>
+        <h2 style="font-size:22px;color:#ffffff;margin-bottom:6px;font-weight:700">
+          Hola, ${esc(p.firstName || 'Paciente')} 👋
+        </h2>
+        <p style="font-size:13.5px;color:#d6f1be;margin:0;line-height:1.5">
+          Bienvenido/a a tu espacio de salud. Puedes reservar turnos online, subir tus análisis para que los revise el equipo médico y descargar tus recetas electrónicas oficiales.
+        </p>
       `}
     </div>
 
-    <!-- 4 Tarjetas de Acciones Rápidas -->
+    <!-- 4 Tarjetas de Acciones Rápidas (Funciones Clave no repetidas) -->
     <div class="portal-actions-grid">
       <div class="portal-action-card" data-action="portal-open-booking">
         <div class="portal-action-top">
@@ -1616,83 +1620,87 @@ function portalTabInicio(p, d, upcoming) {
           <span class="portal-action-arrow">→</span>
         </div>
         <div class="portal-action-title">Sacar Turno Online</div>
-        <div class="portal-action-desc">Elige especialidad, profesional y horario de atención.</div>
-      </div>
-      <div class="portal-action-card" data-action="portal-tab" data-tab="recetas">
-        <div class="portal-action-top">
-          <div class="portal-action-icon">${icon('file', 20)}</div>
-          <span class="portal-action-arrow">→</span>
-        </div>
-        <div class="portal-action-title">Mis Recetas</div>
-        <div class="portal-action-desc">${prescriptions.length} ${prescriptions.length === 1 ? 'receta disponible' : 'recetas disponibles'} en PDF con firma digital oficial.</div>
+        <div class="portal-action-desc">Elige especialidad, profesional médico y horario disponible.</div>
       </div>
       <div class="portal-action-card" data-action="portal-open-upload">
         <div class="portal-action-top">
           <div class="portal-action-icon">${icon('upload', 20)}</div>
           <span class="portal-action-arrow">→</span>
         </div>
-        <div class="portal-action-title">Subir Estudios / Lab</div>
-        <div class="portal-action-desc">Adjunta análisis o informes a tu historia clínica.</div>
+        <div class="portal-action-title">Subir Estudio / Lab</div>
+        <div class="portal-action-desc">Comparte análisis o informes para evaluación del equipo médico.</div>
       </div>
-      <div class="portal-action-card" data-action="portal-tab" data-tab="facturas">
+      <div class="portal-action-card" data-action="portal-tab" data-tab="recetas">
         <div class="portal-action-top">
-          <div class="portal-action-icon">${icon('card', 20)}</div>
+          <div class="portal-action-icon">${icon('file', 20)}</div>
           <span class="portal-action-arrow">→</span>
         </div>
-        <div class="portal-action-title">Mis Facturas</div>
-        <div class="portal-action-desc">${invoices.length} ${invoices.length === 1 ? 'comprobante oficial' : 'comprobantes oficiales'} emitidos con validación AFIP.</div>
+        <div class="portal-action-title">Mis Documentos</div>
+        <div class="portal-action-desc">Accede a tus recetas electrónicas, certificados y facturas AFIP.</div>
+      </div>
+      <div class="portal-action-card" data-action="portal-tab" data-tab="consentimientos">
+        <div class="portal-action-top">
+          <div class="portal-action-icon">${icon('shield', 20)}</div>
+          <span class="portal-action-arrow">→</span>
+        </div>
+        <div class="portal-action-title">Consentimientos</div>
+        <div class="portal-action-desc">Historial de autorizaciones y consentimientos informados firmados.</div>
       </div>
     </div>
 
-    <!-- Paneles Inferiores de Resumen -->
+    <!-- Paneles Inferiores de Resumen Informativo y de Valor -->
     <div class="home-lower">
       <section class="panel">
         <div class="panel-header">
-          <h2>Recetas Médicas Recientes</h2>
-          <button class="text-link" data-action="portal-tab" data-tab="recetas">Ver todas (${prescriptions.length}) →</button>
+          <h2>Sede y Canales de Atención</h2>
         </div>
-        <div class="panel-body">
-          ${prescriptions.slice(0, 2).map(r => `
-            <div style="padding:12px;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:10px;background:#f8fafc">
-              <div class="between">
-                <b style="font-size:12.5px;color:#18362b">Receta Médica Electrónica Oficial</b>
-                <span class="tiny muted">${fmtDate(r.createdAt, true)}</span>
-              </div>
-              <p style="font-size:12px;color:#334155;margin:8px 0;white-space:pre-wrap">${esc(r.content)}</p>
-              <div style="margin-top:6px">
-                <a href="/api/prescriptions/${r.id}/document" target="_blank" class="text-link" style="font-size:12px;color:#1b4c37;font-weight:600">
-                  ${icon('download', 13)} Descargar Receta Oficial (PDF)
-                </a>
-              </div>
+        <div class="panel-body" style="font-size:13px;color:#334155;line-height:1.6">
+          <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:12px">
+            <span style="color:#1b4c37;margin-top:2px">${icon('map', 16)}</span>
+            <div>
+              <b style="color:#0f172a;display:block">Dirección de la Clínica</b>
+              <span>${esc(clinic.address || 'Sede Central · Consultorios Médicos')}</span>
             </div>
-          `).join('') || empty('Sin recetas recientes', 'Tus prescripciones médicas aparecerán aquí una vez emitidas.')}
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:12px">
+            <span style="color:#1b4c37;margin-top:2px">${icon('phone', 16)}</span>
+            <div>
+              <b style="color:#0f172a;display:block">Teléfono y Guardia</b>
+              <span>${esc(clinic.phone || '+54 11 4000-0000')}</span>
+            </div>
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:12px">
+            <span style="color:#1b4c37;margin-top:2px">${icon('clock', 16)}</span>
+            <div>
+              <b style="color:#0f172a;display:block">Horarios de Atención</b>
+              <span>Lunes a Viernes: 08:00 a 20:00 hs · Sábados: 09:00 a 14:00 hs</span>
+            </div>
+          </div>
+          <div style="margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0">
+            <a href="https://wa.me/5491140000000" target="_blank" class="btn primary small" style="background:#15803d;display:inline-flex;align-items:center;gap:6px">
+              ${icon('chat', 14)} Contactar por WhatsApp de Secretaría
+            </a>
+          </div>
         </div>
       </section>
 
       <section class="panel">
         <div class="panel-header">
-          <h2>Estudios y Archivos Médicos</h2>
-          <button class="btn small" data-action="portal-open-upload">${icon('plus', 12)} Subir estudio</button>
+          <h2>Guía Rápida para el Paciente</h2>
         </div>
-        <div class="panel-body">
-          ${records.slice(0, 2).map(rec => `
-            <div style="padding:12px;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:10px;background:#f8fafc">
-              <div class="between">
-                <b style="font-size:12.5px;color:#18362b">${esc(rec.title || 'Estudio / Laboratorio')}</b>
-                <span class="badge blue">${esc(rec.specialty || 'General')}</span>
-              </div>
-              <div class="tiny muted" style="margin-top:4px">${fmtDate(rec.createdAt, true)} · Subido por: ${esc(rec.author)}</div>
-              ${rec.attachments && rec.attachments.length ? `
-                <div style="margin-top:8px">
-                  ${rec.attachments.map(att => `
-                    <button class="attachment-chip" data-action="view-attachment" data-url="${esc(att.data)}" data-name="${esc(att.name)}" data-type="${esc(att.type)}">
-                      ${icon('file', 12)} ${esc(att.name)}
-                    </button>
-                  `).join('')}
-                </div>
-              ` : ''}
-            </div>
-          `).join('') || empty('Sin estudios adjuntos', 'Puedes subir análisis o imágenes médicas para que tu profesional las evalúe.', btn('Subir estudio', 'portal-open-upload', 'upload', 'small primary'))}
+        <div class="panel-body" style="font-size:12.5px;color:#475569;line-height:1.6">
+          <div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #f1f5f9">
+            <b style="color:#15372f;display:block;font-size:13px;margin-bottom:2px">🧪 Análisis de Laboratorio</b>
+            <span>Para extracciones de sangre y bioquímica general, se recomienda presentarse con 8 a 12 horas de ayuno previo.</span>
+          </div>
+          <div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #f1f5f9">
+            <b style="color:#15372f;display:block;font-size:13px;margin-bottom:2px">💊 Validez de Recetas Electrónicas</b>
+            <span>Las recetas emitidas en tu portal cuentan con firma digital y código de barras normativo, válidas en todas las farmacias del país.</span>
+          </div>
+          <div>
+            <b style="color:#15372f;display:block;font-size:13px;margin-bottom:2px">🔒 Historia Clínica Confidencial</b>
+            <span>Tus estudios y evoluciones están resguardados bajo estricto secreto médico y trazabilidad inmutable conforme a la ley de derechos del paciente.</span>
+          </div>
         </div>
       </section>
     </div>
@@ -2747,6 +2755,61 @@ function recordCard(r) {
           ${v.bmi ? `<div class="vitals-box"><span class="v-label">IMC</span><span class="v-val">${esc(v.bmi)}</span></div>` : ''}
         </div>
         ${v.notes ? `<p style="margin-top:10px">${esc(v.notes)}</p>` : ''}
+      ` : (r.type === 'HOSPITAL_DE_DIA' || content.recordType === 'HOSPITAL_DE_DIA') ? `
+        <div class="hospital-day-evolution" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px;margin-bottom:12px">
+          <div class="between" style="margin-bottom:8px">
+            <span class="badge" style="background:#15803d;color:#ffffff;font-weight:700;font-size:11px">
+              🏥 HOSPITAL DE DÍA · ${esc(content.therapyType || 'Sueroterapia')} (${esc(content.resource || 'Sillón')})
+            </span>
+            <span style="font-size:12px;font-weight:700;color:#166534">Sesión ${content.sessionNumber || 1}/${content.totalSessions || 1}</span>
+          </div>
+
+          ${content.instructions ? `<p style="font-size:12.5px;color:#1e3a2b;margin-bottom:10px"><b>Indicación médica:</b> ${esc(content.instructions)}</p>` : ''}
+
+          ${(content.itemsAdministered && content.itemsAdministered.length) ? `
+            <div style="margin-bottom:10px;background:#ffffff;border:1px solid #86efac;border-radius:8px;padding:10px">
+              <strong style="font-size:12px;color:#166534;display:block;margin-bottom:6px">Insumos y Fármacos Administrados (Stock descontado):</strong>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px">
+                ${content.itemsAdministered.map(it => `
+                  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:5px 8px;font-size:11.5px;display:flex;justify-content:space-between">
+                    <span style="font-weight:600;color:#334155">${esc(it.name)}</span>
+                    <span style="color:#15803d;font-weight:700">${esc(it.dose || `${it.quantity} un`)}</span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+          ${(content.hrvTable && content.hrvTable.length) ? `
+            <div style="margin-bottom:10px">
+              <strong style="font-size:12px;color:#166534;display:block;margin-bottom:4px">Variabilidad de la Frecuencia Cardíaca (HRV):</strong>
+              <table class="clinical-table" style="background:#ffffff;border-radius:8px;overflow:hidden">
+                <thead>
+                  <tr>
+                    <th>Hora</th><th>HR (FC)</th><th>HRV</th><th>RMSSD</th><th>SDNN</th><th>PNN50</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${content.hrvTable.map(row => `
+                    <tr>
+                      <td>${esc(row.time || '')}</td>
+                      <td>${esc(row.hr || '')}</td>
+                      <td>${esc(row.hrv || '')}</td>
+                      <td>${esc(row.rmssd || '')}</td>
+                      <td>${esc(row.sdnn || '')}</td>
+                      <td>${esc(row.pnn50 || '')}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : ''}
+
+          <div style="font-size:12px;color:#334155;margin-top:6px">
+            <b>Tolerancia clínica:</b> ${esc(content.tolerance || 'Buena tolerancia sin intercurrencias.')}
+          </div>
+          ${content.notes ? `<div style="font-size:12px;color:#475569;margin-top:4px"><b>Observaciones de enfermería:</b> ${esc(content.notes)}</div>` : ''}
+        </div>
       ` : content.html ? `
         <div class="clinical-html-content" style="line-height:1.6">${content.html}</div>
       ` : hasSoap ? `
@@ -2882,8 +2945,10 @@ function recordsView() {
       const isStudy = r.type === 'STUDY' || r.type === 'IMAGE' || (r.attachments && r.attachments.length > 0);
       if (!isStudy) return false;
     } else if (omniTab === 'evoluciones') {
-      const isEvol = !r.type || r.type === 'SOAP' || r.type === 'AMENDMENT';
+      const isEvol = !r.type || r.type === 'SOAP' || r.type === 'AMENDMENT' || r.type === 'HOSPITAL_DE_DIA';
       if (!isEvol) return false;
+      if (S.omniEvolFilter === 'MEDICAL' && r.type === 'HOSPITAL_DE_DIA') return false;
+      if (S.omniEvolFilter === 'HOSPITAL_DAY' && r.type !== 'HOSPITAL_DE_DIA') return false;
     } else if (omniTab === 'laboratorio') {
       if (r.type !== 'LAB') return false;
     } else if (omniTab === 'signos-vitales') {
@@ -3096,11 +3161,18 @@ function recordsView() {
                   </div>`).join('') || empty('Sin consentimientos registrados', 'No hay consentimientos informados emitidos para este paciente.', btn('Emitir primer consentimiento', 'new-consent', 'plus', 'small', `data-patient-id="${p.id}"`))}
                 </div>
               </section>
-            ` : filteredRecords.length ? filteredRecords.map(recordCard).join('') : `
+            ` : (omniTab === 'evoluciones' ? `
+              <div class="flex" style="gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+                <span style="font-size:12px;font-weight:600;color:#64748b">Sector Clínico:</span>
+                <button class="chip ${(!S.omniEvolFilter || S.omniEvolFilter === 'ALL') ? 'active' : ''}" data-action="set-evol-filter" data-val="ALL">Todas las evoluciones (${allPatientRecords.filter(r => !r.type || r.type === 'SOAP' || r.type === 'AMENDMENT' || r.type === 'HOSPITAL_DE_DIA').length})</button>
+                <button class="chip ${S.omniEvolFilter === 'MEDICAL' ? 'active' : ''}" data-action="set-evol-filter" data-val="MEDICAL">🩺 Consultas Médicas (SOAP)</button>
+                <button class="chip ${S.omniEvolFilter === 'HOSPITAL_DAY' ? 'active' : ''}" data-action="set-evol-filter" data-val="HOSPITAL_DAY">🏥 Hospital de Día (Enfermería / Insumos)</button>
+              </div>
+            ` : '') + (filteredRecords.length ? filteredRecords.map(recordCard).join('') : `
               <section class="panel" style="padding:40px 20px;text-align:center">
                 ${empty('Sin registros en esta vista', 'No se encontraron evoluciones ni estudios con los filtros aplicados.', btn('Nueva evolución SOAP', 'new-record', 'plus', 'primary'))}
               </section>
-            `}
+            `)}
           </main>
         </div>
       ` : empty('Selecciona un paciente', 'Selecciona un paciente para visualizar su historial.')}
@@ -4461,7 +4533,529 @@ function medicalOrderDialog(patientId = null) {
   }, 50);
 }
 
-function omniaImporterDialog() {
+function hospitalDayView() {
+  const d = S.data;
+  const orders = d?.medicalOrders || [];
+  const inventory = d?.inventory || [];
+  const filter = S.hospitalDayFilter || 'ALL';
+
+  const defaultResources = [
+    { id: 'sill-1', name: 'Sillón 1', type: 'SUEROTERAPIA', label: 'Sueroterapia / Infusión' },
+    { id: 'sill-2', name: 'Sillón 2', type: 'SUEROTERAPIA', label: 'Sueroterapia / Infusión' },
+    { id: 'sill-3', name: 'Sillón 3', type: 'SUEROTERAPIA', label: 'Sueroterapia / Infusión' },
+    { id: 'sill-4', name: 'Sillón 4', type: 'SUEROTERAPIA', label: 'Sueroterapia / Infusión' },
+    { id: 'cam-1', name: 'Cámara Hiperbárica 1', type: 'CAMARA_HIPERBARICA', label: 'Medicina Hiperbárica' },
+    { id: 'luz-1', name: 'Cabina Fotobiomodulación', type: 'FOTOBIOMODULACION', label: 'Terapia de Luz / LED' }
+  ];
+
+  const inProgressOrders = orders.filter(o => o.status === 'IN_PROGRESS');
+  const pendingOrders = orders.filter(o => o.status === 'PENDING');
+  const administeredToday = orders.filter(o => o.status === 'ADMINISTERED' && o.administeredAt && o.administeredAt.startsWith(dateKey()));
+
+  const resourceCards = defaultResources.map(res => {
+    const activeOrder = inProgressOrders.find(o => o.resource === res.name) || pendingOrders.find(o => o.resource === res.name);
+    return { ...res, order: activeOrder };
+  });
+
+  const filteredOrders = orders.filter(o => {
+    if (filter === 'PENDING') return o.status === 'PENDING';
+    if (filter === 'IN_PROGRESS') return o.status === 'IN_PROGRESS';
+    if (filter === 'ADMINISTERED') return o.status === 'ADMINISTERED';
+    if (filter === 'SUEROTERAPIA') return o.therapyType === 'SUEROTERAPIA';
+    if (filter === 'CAMARA_HIPERBARICA') return o.therapyType === 'CAMARA_HIPERBARICA';
+    if (filter === 'FOTOBIOMODULACION') return o.therapyType === 'FOTOBIOMODULACION';
+    return true;
+  });
+
+  return heading('Hospital de Día & Terapias Ambulatorias',
+    'Gestión de sillones de sueroterapia, cámara hiperbárica y fotobiomodulación con evolución de enfermería y descuento automático de insumos.',
+    `<button class="btn primary" data-action="new-hospital-day-order">${icon('plus', 14)} Nueva Indicación por Sesión</button>`
+  ) + `
+  <div class="stats" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+    ${stat('Sillones / Boxes Ocupados', `${inProgressOrders.length} / ${defaultResources.length}`, 'activity', `${inProgressOrders.length} pacientes en sesión activa`, inProgressOrders.length > 0)}
+    ${stat('Sesiones en Espera', pendingOrders.length, 'clock', `${pendingOrders.length} pacientes programados`, pendingOrders.length > 0)}
+    ${stat('Sesiones Finalizadas Hoy', administeredToday.length, 'checkcircle', 'Stock descontado automáticamente')}
+    ${stat('Insumos de Suero en Stock', inventory.filter(i => /suer|ampolla|vitamina|zinc|taurina|selenio/i.test(i.name)).length, 'box', 'Fármacos y descartables activos')}
+  </div>
+
+  <section class="panel" style="margin-bottom:24px">
+    <div class="panel-header">
+      <div>
+        <h2>Mapa de Ocupación en Tiempo Real</h2>
+        <p class="panel-sub">Estado vivo de sillones de infusión, cámara hiperbárica y cabina de fotobiomodulación.</p>
+      </div>
+      <div class="flex" style="gap:10px">
+        <span class="badge green">🟢 Disponible</span>
+        <span class="badge blue">🔵 En Sesión / Infusión</span>
+        <span class="badge amber">🟡 Esperando Paciente</span>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div class="hospital-day-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
+        ${resourceCards.map(rc => {
+          const ord = rc.order;
+          const isOcc = Boolean(ord && ord.status === 'IN_PROGRESS');
+          const isPend = Boolean(ord && ord.status === 'PENDING');
+          const pat = ord ? patientBy(ord.patientId) : null;
+          const items = ord?.items || [];
+
+          return `
+          <div class="hospital-box-card" style="border:1px solid ${isOcc ? '#3b82f6' : isPend ? '#f59e0b' : '#e2e8f0'};border-radius:12px;padding:16px;background:${isOcc ? '#eff6ff' : isPend ? '#fffbeb' : '#ffffff'};box-shadow:0 1px 3px rgba(0,0,0,0.05);transition:all 0.2s ease">
+            <div class="between" style="margin-bottom:10px">
+              <div>
+                <b style="font-size:14px;color:#0f172a;display:block">${esc(rc.name)}</b>
+                <span style="font-size:11px;color:#64748b">${esc(rc.label)}</span>
+              </div>
+              <span class="badge ${isOcc ? 'blue' : isPend ? 'amber' : 'green'}" style="font-size:11px;font-weight:700">
+                ${isOcc ? '🔵 En Sesión' : isPend ? '🟡 Paciente Esperado' : '🟢 Disponible'}
+              </span>
+            </div>
+
+            ${ord ? `
+              <div style="background:#ffffff;border-radius:8px;padding:10px 12px;border:1px solid rgba(0,0,0,0.08);margin-bottom:12px">
+                <div class="between">
+                  <b style="font-size:13px;color:#18362b">${esc(nameOf(pat))}</b>
+                  <span class="tiny muted">DNI ${esc(pat?.dni || '—')}</span>
+                </div>
+                <div style="font-size:12px;color:#334155;margin-top:4px">
+                  <b>Terapia:</b> ${esc(ord.therapyType || 'Sueroterapia')} · Sesión ${ord.sessionNumber || 1}/${ord.totalSessions || 1}
+                </div>
+                <div style="font-size:11.5px;color:#64748b;margin-top:3px">
+                  <b>Médico:</b> ${esc(ord.doctorName)}
+                </div>
+                ${items.length ? `
+                  <div style="margin-top:6px;padding-top:6px;border-top:1px dashed #e2e8f0;font-size:11px;color:#475569">
+                    <b>Fármacos/Insumos:</b> ${items.map(it => `${esc(it.name)}${it.dose ? ` (${esc(it.dose)})` : ''}`).slice(0, 3).join(', ')}${items.length > 3 ? '...' : ''}
+                  </div>
+                ` : ''}
+              </div>
+
+              <div class="flex" style="gap:8px">
+                ${isPend ? `
+                  <button class="btn primary small wide" data-action="hd-checkin" data-id="${ord.id}" style="background:#15803d">
+                    ${icon('check', 13)} Paciente Llegó / Ocupar Sillón
+                  </button>
+                ` : `
+                  <button class="btn primary small wide" data-action="hd-finish" data-id="${ord.id}" style="background:#1b4c37">
+                    ${icon('checkcircle', 13)} Finalizar Sesión & Descontar Stock
+                  </button>
+                `}
+              </div>
+            ` : `
+              <div style="padding:20px 10px;text-align:center;color:#64748b;font-size:12px">
+                Sillón libre y sanitizado listo para asignar.
+              </div>
+              <button class="btn small wide" data-action="new-hospital-day-order" data-resource="${esc(rc.name)}" style="border-style:dashed;color:#1b4c37">
+                ${icon('plus', 12)} Asignar Paciente / Terapia
+              </button>
+            `}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <div>
+        <h2>Kardex de Hospital de Día y Administración de Insumos</h2>
+        <p class="panel-sub">Órdenes médicas por sesión, evolución separada de enfermería y descuento automático de inventario.</p>
+      </div>
+      <div class="flex" style="gap:8px;flex-wrap:wrap">
+        <button class="chip ${filter === 'ALL' ? 'active' : ''}" data-action="hd-filter" data-val="ALL">Todas (${orders.length})</button>
+        <button class="chip ${filter === 'PENDING' ? 'active' : ''}" data-action="hd-filter" data-val="PENDING">Pendientes (${pendingOrders.length})</button>
+        <button class="chip ${filter === 'IN_PROGRESS' ? 'active' : ''}" data-action="hd-filter" data-val="IN_PROGRESS">En Sillón (${inProgressOrders.length})</button>
+        <button class="chip ${filter === 'ADMINISTERED' ? 'active' : ''}" data-action="hd-filter" data-val="ADMINISTERED">Finalizadas</button>
+      </div>
+    </div>
+    <div class="panel-body">
+      ${filteredOrders.length ? `
+        <div style="display:flex;flex-direction:column;gap:12px">
+          ${filteredOrders.map(o => {
+            const pat = patientBy(o.patientId);
+            const isPending = o.status === 'PENDING';
+            const isInProgress = o.status === 'IN_PROGRESS';
+            const isAdministered = o.status === 'ADMINISTERED';
+            const items = o.items || [];
+            const vitals = o.vitals || {};
+
+            return `
+            <div class="soap-item" style="border-left:4px solid ${isPending ? '#f59e0b' : isInProgress ? '#3b82f6' : '#15803d'};padding:16px;background:#ffffff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
+              <div class="between" style="align-items:flex-start">
+                <div>
+                  <div class="flex" style="gap:8px;align-items:center;flex-wrap:wrap">
+                    <strong style="font-size:15px;color:#18362b">${esc(nameOf(pat))}</strong>
+                    <span class="tiny muted">DNI ${esc(pat?.dni || '—')}</span>
+                    <span class="badge ${isPending ? 'amber' : isInProgress ? 'blue' : 'green'}">
+                      ${isPending ? '🟡 Pendiente' : isInProgress ? '🔵 En Sillón' : '🟢 Administrado & Descontado'}
+                    </span>
+                    <span class="badge" style="background:#eaf6ee;color:#1b4c37;font-weight:600">
+                      ${esc(o.therapyType || 'Sueroterapia')} · ${esc(o.resource || 'Sillón')} · Sesión ${o.sessionNumber || 1}/${o.totalSessions || 1}
+                    </span>
+                  </div>
+                  <div class="tiny muted" style="margin-top:4px">
+                    Indicado por <b>${esc(o.doctorName)}</b> · ${fmtDate(o.createdAt, true)} a las ${fmtTime(o.createdAt)} hs
+                    ${o.administeredBy ? ` · Administrado por <b>${esc(o.administeredBy)}</b> (${fmtTime(o.administeredAt)} hs)` : ''}
+                  </div>
+                </div>
+                <div class="flex" style="gap:6px">
+                  ${isPending ? `
+                    <button class="btn small primary" data-action="hd-checkin" data-id="${o.id}" style="background:#15803d">
+                      ${icon('check', 13)} Paciente Llegó
+                    </button>
+                    <button class="btn small danger" data-action="cancel-order" data-id="${o.id}">Cancelar</button>
+                  ` : isInProgress ? `
+                    <button class="btn small primary" data-action="hd-finish" data-id="${o.id}" style="background:#1b4c37">
+                      ${icon('checkcircle', 13)} Finalizar y Descontar Stock
+                    </button>
+                  ` : `
+                    <button class="btn small" data-action="hd-view-evolution" data-patient="${o.patientId}">
+                      ${icon('file', 13)} Ver Evolución en HCD
+                    </button>
+                  `}
+                </div>
+              </div>
+
+              <div style="margin-top:12px;background:#f8fafc;border-radius:8px;padding:12px;border:1px solid #e2e8f0">
+                <div style="font-size:13px;color:#0f172a;margin-bottom:8px">
+                  <b>Pautas clínicas:</b> ${esc(o.instructions)}
+                </div>
+                ${items.length ? `
+                  <div style="font-size:12px">
+                    <b style="color:#1b4c37;display:block;margin-bottom:6px">Insumos y Fármacos indicados por sesión (descuento automático de inventario):</b>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">
+                      ${items.map(it => `
+                        <div style="background:#ffffff;border:1px solid #cbd5e1;border-radius:6px;padding:6px 10px;display:flex;justify-content:space-between;align-items:center">
+                          <span style="font-weight:600;color:#334155">${esc(it.name)}</span>
+                          <span class="badge" style="background:#eaf6ee;color:#1b4c37">${esc(it.dose || `${it.quantity} un`)}</span>
+                        </div>
+                      `).join('')}
+                    </div>
+                  </div>
+                ` : ''}
+              </div>
+
+              ${vitals.bloodPressure || vitals.heartRate || vitals.oxygenSaturation ? `
+                <div class="flex" style="gap:12px;margin-top:10px;font-size:11.5px;color:#64748b">
+                  ${vitals.bloodPressure ? `<span><b>TA:</b> ${esc(vitals.bloodPressure)} mmHg</span>` : ''}
+                  ${vitals.heartRate ? `<span><b>FC:</b> ${esc(vitals.heartRate)} lpm</span>` : ''}
+                  ${vitals.oxygenSaturation ? `<span><b>SatO2:</b> ${esc(vitals.oxygenSaturation)}%</span>` : ''}
+                </div>
+              ` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+      ` : empty('Sin sesiones en este filtro', 'No hay órdenes de Hospital de Día registradas con el filtro seleccionado.', btn('Nueva Indicación por Sesión', 'new-hospital-day-order', 'plus', 'primary'))}
+    </div>
+  </section>`;
+}
+
+function newHospitalDayOrderDialog(patientId = null, defaultResource = null, defaultTherapy = null) {
+  const p = patientBy(patientId) || S.data.patients[0];
+  const inventory = S.data.inventory || [];
+  const doctors = S.data.doctors || [];
+
+  const resources = [
+    'Sillón 1', 'Sillón 2', 'Sillón 3', 'Sillón 4',
+    'Cámara Hiperbárica 1', 'Cabina Fotobiomodulación'
+  ];
+
+  formDialog('new-hospital-day-order', 'Nueva Indicación de Hospital de Día por Sesión',
+    'Permite que el médico indique los insumos y dosis por sesión. Genera orden para enfermería y descuenta stock automáticamente.',
+    `<div class="form-grid">
+      <div class="form-field">
+        <label>Paciente *</label>
+        <select name="patientId" class="input" required>
+          ${S.data.patients.map(pt => `<option value="${pt.id}" ${pt.id === p?.id ? 'selected' : ''}>${esc(nameOf(pt))} (DNI ${esc(pt.dni || '—')})</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-field">
+        <label>Médico Prescriptor *</label>
+        <select name="doctorId" class="input" required>
+          ${doctors.map(d => `<option value="${d.id}">${esc(d.name)} (${esc(d.specialty)})</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-field">
+        <label>Tipo de Terapia *</label>
+        <select name="therapyType" id="hd-therapy-type" class="input" required>
+          <option value="SUEROTERAPIA" ${defaultTherapy === 'SUEROTERAPIA' ? 'selected' : ''}>Sueroterapia / Infusión Endovenosa</option>
+          <option value="CAMARA_HIPERBARICA" ${defaultTherapy === 'CAMARA_HIPERBARICA' ? 'selected' : ''}>Cámara Hiperbárica (CHB)</option>
+          <option value="FOTOBIOMODULACION" ${defaultTherapy === 'FOTOBIOMODULACION' ? 'selected' : ''}>Fotobiomodulación (Luz / Láser)</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>Sillón / Box de Tratamiento *</label>
+        <select name="resource" id="hd-resource-select" class="input" required>
+          ${resources.map(r => `<option value="${r}" ${r === defaultResource ? 'selected' : ''}>${r}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-field">
+        <label>Número de Sesión</label>
+        <input type="number" name="sessionNumber" value="1" min="1" max="99" class="input" required>
+      </div>
+      <div class="form-field">
+        <label>Total de Sesiones Programadas</label>
+        <input type="number" name="totalSessions" value="5" min="1" max="99" class="input" required>
+      </div>
+    </div>
+
+    <!-- Presets de Protocolos Rápidos -->
+    <div style="margin:16px 0;padding:12px;background:#f8fafc;border-radius:10px;border:1px solid #e2e8f0">
+      <b style="font-size:12px;color:#1e4c3a;display:block;margin-bottom:8px">Cargar Protocolo Predefinido en 1 Clic:</b>
+      <div class="flex" style="gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn small" id="hd-preset-myers" style="background:#ffffff;border:1px solid #86efac;color:#166534">
+          ⚡ Myers & Vitamina C Megadosis
+        </button>
+        <button type="button" class="btn small" id="hd-preset-chb" style="background:#ffffff;border:1px solid #93c5fd;color:#1e40af">
+          💨 Cámara Hiperbárica (60 min)
+        </button>
+        <button type="button" class="btn small" id="hd-preset-luz" style="background:#ffffff;border:1px solid #fbcfe8;color:#9d174d">
+          🔴 Fotobiomodulación (30 min)
+        </button>
+      </div>
+    </div>
+
+    <!-- Lista de Insumos y Fármacos por Sesión -->
+    <div class="form-field full" style="margin-bottom:16px">
+      <div class="between" style="margin-bottom:8px">
+        <label style="margin:0;font-weight:700;color:#1e4c3a">Insumos y Fármacos indicados por sesión (se descuentan automáticamente):</label>
+        <button type="button" class="btn small primary" id="add-hd-supply-btn" style="background:#1b4c37">${icon('plus', 12)} Agregar Insumo</button>
+      </div>
+      <div id="hd-supplies-container" style="display:flex;flex-direction:column;gap:8px"></div>
+      <input type="hidden" name="itemsJson" id="hd-supplies-json" value="[]">
+    </div>
+
+    <div class="form-field full">
+      <label>Instrucciones y Pautas Clínicas para Enfermería *</label>
+      <textarea name="instructions" id="hd-instructions" class="input" style="height:70px" required placeholder="Ej: Pasar en 45 minutos. Control de TA previa y posterior. En caso de mareo reducir goteo a 30 gotas/min."></textarea>
+    </div>
+    <div class="form-field full">
+      <label>Observaciones o Diagnóstico de Derivación</label>
+      <input type="text" name="notes" class="input" placeholder="Ej: Fatiga crónica, soporte inmunológico post-viral.">
+    </div>`,
+    'Emitir Indicación de Hospital de Día', '', 'wide'
+  );
+
+  setTimeout(() => {
+    const container = $('#hd-supplies-container');
+    const jsonInput = $('#hd-supplies-json');
+    const instructionsInput = $('#hd-instructions');
+
+    const updateJson = () => {
+      const rows = Array.from(container.querySelectorAll('.hd-supply-row'));
+      const items = rows.map(r => ({
+        name: r.querySelector('.hd-sup-name')?.value || '',
+        dose: r.querySelector('.hd-sup-dose')?.value || '',
+        quantity: parseInt(r.querySelector('.hd-sup-qty')?.value, 10) || 1,
+        inventoryId: r.querySelector('.hd-sup-inv')?.value || ''
+      })).filter(x => x.name.trim());
+      if (jsonInput) jsonInput.value = JSON.stringify(items);
+    };
+
+    const addRow = (name = '', dose = '', qty = 1, invId = '') => {
+      const row = document.createElement('div');
+      row.className = 'hd-supply-row flex';
+      row.style.gap = '8px';
+      row.style.alignItems = 'center';
+      row.innerHTML = `
+        <input type="text" class="input hd-sup-name grow" placeholder="Fármaco o Insumo (ej. Vitamina C)" value="${esc(name)}" required style="font-size:12.5px">
+        <input type="text" class="input hd-sup-dose" placeholder="Dosis (ej. 10 gramos)" value="${esc(dose)}" style="width:130px;font-size:12px">
+        <input type="number" class="input hd-sup-qty" value="${qty}" min="1" max="99" style="width:65px;text-align:center" title="Cantidad a descontar de stock">
+        <select class="input hd-sup-inv" style="width:170px;font-size:11.5px">
+          <option value="">-- Vincular stock --</option>
+          ${inventory.map(i => `<option value="${i.id}" ${i.id === invId || i.name.toLowerCase().includes(name.toLowerCase().slice(0, 5)) ? 'selected' : ''}>${esc(i.name)} (${i.quantity} ${esc(i.unit)})</option>`).join('')}
+        </select>
+        <button type="button" class="icon-btn remove-hd-supply" style="color:#b91c1c">${icon('close', 14)}</button>
+      `;
+      container.appendChild(row);
+      updateJson();
+    };
+
+    // Load Myers Preset
+    $('#hd-preset-myers')?.addEventListener('click', () => {
+      container.innerHTML = '';
+      const vitC = inventory.find(i => /vitamina c/i.test(i.name));
+      const tau = inventory.find(i => /taurina/i.test(i.name));
+      const zin = inventory.find(i => /zinc/i.test(i.name));
+      const sel = inventory.find(i => /selenio/i.test(i.name));
+      const man = inventory.find(i => /manganeso/i.test(i.name));
+      const suer = inventory.find(i => /fisiol/i.test(i.name));
+      const guia = inventory.find(i => /guia|gotero/i.test(i.name));
+      const cat = inventory.find(i => /cateter/i.test(i.name));
+
+      addRow('Vitamina C Inyectable', '10 gramos', 1, vitC?.id || '');
+      addRow('Taurina Inyectable', '200 miligramos', 1, tau?.id || '');
+      addRow('Zinc Oligoelemento', '20 miligramos', 1, zin?.id || '');
+      addRow('Selenio Oligoelemento', '200 microgramos', 1, sel?.id || '');
+      addRow('Manganeso Oligoelemento', '20 miligramos', 1, man?.id || '');
+      addRow('Solución Fisiológica 0.9% 500ml', '500 ml', 1, suer?.id || '');
+      addRow('Guía de Macrogotero descartable', '1 unidad', 1, guia?.id || '');
+      addRow('Catéter Intravenoso 22G', '1 unidad', 1, cat?.id || '');
+
+      if (instructionsInput) instructionsInput.value = 'Infusión endovenosa lenta a 45 gotas/min en MSI. Tiempo estimado: 50 minutos. Control de TA previo y post-infusión.';
+      if ($('#hd-therapy-type')) $('#hd-therapy-type').value = 'SUEROTERAPIA';
+    });
+
+    // Load CHB Preset
+    $('#hd-preset-chb')?.addEventListener('click', () => {
+      container.innerHTML = '';
+      const barbijo = inventory.find(i => /barbijo|mascara/i.test(i.name));
+      addRow('Mascara / Barbijo de Oxigenación', '1 unidad', 1, barbijo?.id || '');
+      if (instructionsInput) instructionsInput.value = 'Sesión en Cámara Hiperbárica: Presurización 6 min, permanencia 60 min a 1.45 ATA, despresurización 5 min. Monitoreo de HRV basal y a los 30 min.';
+      if ($('#hd-therapy-type')) $('#hd-therapy-type').value = 'CAMARA_HIPERBARICA';
+      if ($('#hd-resource-select')) $('#hd-resource-select').value = 'Cámara Hiperbárica 1';
+    });
+
+    // Load Luz Preset
+    $('#hd-preset-luz')?.addEventListener('click', () => {
+      container.innerHTML = '';
+      if (instructionsInput) instructionsInput.value = 'Sesión de Fotobiomodulación sistémica: Longitud de onda 660nm (rojo) y 850nm (infrarrojo cercano) por 30 minutos.';
+      if ($('#hd-therapy-type')) $('#hd-therapy-type').value = 'FOTOBIOMODULACION';
+      if ($('#hd-resource-select')) $('#hd-resource-select').value = 'Cabina Fotobiomodulación';
+    });
+
+    $('#add-hd-supply-btn')?.addEventListener('click', () => addRow());
+    container?.addEventListener('input', updateJson);
+    container?.addEventListener('change', updateJson);
+    container?.addEventListener('click', e => {
+      if (e.target.closest('.remove-hd-supply')) {
+        e.target.closest('.hd-supply-row')?.remove();
+        updateJson();
+      }
+    });
+
+    // Default row
+    addRow('Vitamina C Inyectable', '10 gramos', 1);
+  }, 50);
+}
+
+function administerHospitalDayDialog(orderId) {
+  const ord = (S.data?.medicalOrders || []).find(o => o.id === orderId);
+  if (!ord) return;
+  const p = patientBy(ord.patientId);
+  const items = ord.items || [];
+
+  showModal(
+    'Finalizar Sesión & Descontar Insumos de Inventario',
+    `Paciente: ${nameOf(p)} · Terapia: ${esc(ord.therapyType || 'Sueroterapia')} (${esc(ord.resource || 'Sillón')})`,
+    `<form data-form="finish-hospital-day-order" data-id="${ord.id}">
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px;margin-bottom:16px">
+        <b style="font-size:12.5px;color:#166534;display:block;margin-bottom:6px">Insumos a descontar automáticamente de stock:</b>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${items.map(it => `
+            <span class="badge" style="background:#ffffff;border:1px solid #86efac;color:#14532d;font-size:11.5px;padding:4px 8px">
+              ${esc(it.name)} ${it.dose ? `(${esc(it.dose)})` : ''} x ${it.quantity || 1}
+            </span>
+          `).join('') || '<span class="tiny muted">Sin insumos vinculados al inventario</span>'}
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-field">
+          <label>Tensión Arterial (TA) *</label>
+          <input type="text" name="bloodPressure" value="115/75" required placeholder="Ej: 120/80" class="input">
+        </div>
+        <div class="form-field">
+          <label>Frecuencia Cardíaca (FC) *</label>
+          <input type="number" name="heartRate" value="72" required placeholder="lpm" class="input">
+        </div>
+        <div class="form-field">
+          <label>Saturación O2 (%)</label>
+          <input type="number" name="oxygenSaturation" value="98" placeholder="%" class="input">
+        </div>
+        <div class="form-field">
+          <label>Tolerancia al Tratamiento *</label>
+          <input type="text" name="tolerance" value="Buena tolerancia al tratamiento en decúbito supino, sin intercurrencias." required class="input">
+        </div>
+      </div>
+
+      <!-- Tabla de HRV (Variabilidad de la Frecuencia Cardíaca) -->
+      <div class="form-field full" style="margin-top:14px">
+        <div class="between" style="margin-bottom:6px">
+          <label style="margin:0">Datos de Variabilidad Cardíaca (HRV) - Opcional:</label>
+          <button type="button" class="btn small" id="add-hrv-row-btn">${icon('plus', 12)} Agregar medición HRV</button>
+        </div>
+        <table class="clinical-table" style="background:#ffffff;border:1px solid #cbd5e1;border-radius:8px;overflow:hidden">
+          <thead>
+            <tr>
+              <th>Hora</th><th>HR (FC)</th><th>HRV</th><th>RMSSD</th><th>SDNN</th><th>PNN50</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="hd-hrv-tbody">
+            <tr>
+              <td><input type="text" class="hrv-time" value="${fmtTime(new Date())}" style="width:60px;padding:4px;border:1px solid #cbd5e1;border-radius:4px"></td>
+              <td><input type="number" class="hrv-hr" value="70" style="width:60px;padding:4px;border:1px solid #cbd5e1;border-radius:4px"></td>
+              <td><input type="number" class="hrv-hrv" value="40" style="width:60px;padding:4px;border:1px solid #cbd5e1;border-radius:4px"></td>
+              <td><input type="text" class="hrv-rmssd" value="13.04" style="width:70px;padding:4px;border:1px solid #cbd5e1;border-radius:4px"></td>
+              <td><input type="text" class="hrv-sdnn" value="30.46" style="width:70px;padding:4px;border:1px solid #cbd5e1;border-radius:4px"></td>
+              <td><input type="text" class="hrv-pnn50" value="0" style="width:50px;padding:4px;border:1px solid #cbd5e1;border-radius:4px"></td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+        <input type="hidden" name="hrvJson" id="hd-hrv-json" value="[]">
+      </div>
+
+      <div class="form-field full">
+        <label>Observaciones de Enfermería</label>
+        <textarea name="notes" class="input" style="height:60px" placeholder="Comentarios de cierre de sesión, retiro de vía, etc."></textarea>
+      </div>
+
+      <div class="form-error" role="alert"></div>
+      <div class="dialog-actions">
+        <button type="button" class="btn" data-action="close-modal">Cancelar</button>
+        <button type="submit" class="btn primary" style="background:#15803d">
+          ${icon('checkcircle', 14)} Finalizar Sesión, Descontar Stock & Guardar HCD
+        </button>
+      </div>
+    </form>`, '', 'wide'
+  );
+
+  setTimeout(() => {
+    const tbody = $('#hd-hrv-tbody');
+    const hrvJson = $('#hd-hrv-json');
+
+    const updateHrv = () => {
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      const data = rows.map(r => ({
+        time: r.querySelector('.hrv-time')?.value || '',
+        hr: r.querySelector('.hrv-hr')?.value || '',
+        hrv: r.querySelector('.hrv-hrv')?.value || '',
+        rmssd: r.querySelector('.hrv-rmssd')?.value || '',
+        sdnn: r.querySelector('.hrv-sdnn')?.value || '',
+        pnn50: r.querySelector('.hrv-pnn50')?.value || ''
+      })).filter(x => x.time || x.hr);
+      if (hrvJson) hrvJson.value = JSON.stringify(data);
+    };
+
+    $('#add-hrv-row-btn')?.addEventListener('click', () => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="text" class="hrv-time" value="${fmtTime(new Date())}" style="width:60px;padding:4px;border:1px solid #cbd5e1;border-radius:4px"></td>
+        <td><input type="number" class="hrv-hr" value="75" style="width:60px;padding:4px;border:1px solid #cbd5e1;border-radius:4px"></td>
+        <td><input type="number" class="hrv-hrv" value="35" style="width:60px;padding:4px;border:1px solid #cbd5e1;border-radius:4px"></td>
+        <td><input type="text" class="hrv-rmssd" value="10.00" style="width:70px;padding:4px;border:1px solid #cbd5e1;border-radius:4px"></td>
+        <td><input type="text" class="hrv-sdnn" value="25.00" style="width:70px;padding:4px;border:1px solid #cbd5e1;border-radius:4px"></td>
+        <td><input type="text" class="hrv-pnn50" value="0" style="width:50px;padding:4px;border:1px solid #cbd5e1;border-radius:4px"></td>
+        <td><button type="button" class="icon-btn remove-hrv-row" style="color:#b91c1c">${icon('close', 13)}</button></td>
+      `;
+      tbody.appendChild(tr);
+      updateHrv();
+    });
+
+    tbody?.addEventListener('input', updateHrv);
+    tbody?.addEventListener('click', e => {
+      if (e.target.closest('.remove-hrv-row')) {
+        e.target.closest('tr')?.remove();
+        updateHrv();
+      }
+    });
+
+    updateHrv();
+  }, 50);
+}
+
+function omniaImportDialog() {
   formDialog('omnia-importer', 'Importación Masiva de Pacientes (Omniasalud / CSV)',
     'Transfiere el padrón de pacientes, coberturas, datos de contacto y antecedentes clínicos desde Omniasalud u otros softwares.',
     `<div class="form-field full">
@@ -4958,6 +5552,41 @@ document.addEventListener('click', async e => {
         break;
       case 'new-medical-order':
         medicalOrderDialog(el.dataset.patientId || S.selectedPatient);
+        break;
+      case 'new-hospital-day-order':
+        newHospitalDayOrderDialog(el.dataset.patient || S.selectedPatient, el.dataset.resource);
+        break;
+      case 'hd-filter':
+        S.hospitalDayFilter = el.dataset.val;
+        contentOnly();
+        break;
+      case 'hd-checkin': {
+        el.disabled = true;
+        try {
+          await api('/api/medical-orders/' + id + '/checkin', 'POST', {});
+          await refresh();
+          contentOnly();
+          toast('Paciente ingresó a sesión. Sillón ocupado.');
+        } catch (err) {
+          toast(err.message, true);
+        } finally {
+          el.disabled = false;
+        }
+        break;
+      }
+      case 'hd-finish':
+        administerHospitalDayDialog(id);
+        break;
+      case 'hd-view-evolution': {
+        S.selectedPatient = el.dataset.patient;
+        S.omniTab = 'evoluciones';
+        S.omniEvolFilter = 'HOSPITAL_DAY';
+        await navigate('records');
+        break;
+      }
+      case 'set-evol-filter':
+        S.omniEvolFilter = el.dataset.val;
+        contentOnly();
         break;
       case 'staff-tab':
         S.staffTab = el.dataset.value;
@@ -5514,6 +6143,46 @@ document.addEventListener('submit', async e => {
         await refreshPortal();
         S.portal.activeTab = 'estudios';
         render();
+        return;
+      }
+      case 'new-hospital-day-order': {
+        let items = [];
+        try { items = JSON.parse(b.itemsJson || '[]'); } catch {}
+        await api('/api/medical-orders', 'POST', {
+          patientId: b.patientId,
+          doctorId: b.doctorId,
+          therapyType: b.therapyType,
+          resource: b.resource,
+          sessionNumber: parseInt(b.sessionNumber, 10) || 1,
+          totalSessions: parseInt(b.totalSessions, 10) || 1,
+          instructions: b.instructions,
+          items,
+          notes: b.notes || ''
+        });
+        closeModal();
+        await refresh();
+        contentOnly();
+        toast('Indicación de Hospital de Día registrada para enfermería.');
+        return;
+      }
+      case 'finish-hospital-day-order': {
+        let hrvTable = [];
+        try { hrvTable = JSON.parse(b.hrvJson || '[]'); } catch {}
+        const id = form.dataset.id;
+        await api('/api/medical-orders/' + id + '/administer', 'POST', {
+          vitals: {
+            bloodPressure: b.bloodPressure,
+            heartRate: b.heartRate,
+            oxygenSaturation: b.oxygenSaturation
+          },
+          hrvTable,
+          tolerance: b.tolerance,
+          notes: b.notes || ''
+        });
+        closeModal();
+        await refresh();
+        contentOnly();
+        toast('¡Sesión finalizada! Insumos descontados y evolución de enfermería generada.');
         return;
       }
     }

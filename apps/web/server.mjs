@@ -82,6 +82,13 @@ try { db.exec('ALTER TABLE invoices ADD COLUMN invoiceType TEXT DEFAULT "B"'); }
 try { db.exec('ALTER TABLE invoices ADD COLUMN invoiceNumber TEXT'); } catch {}
 try { db.exec('ALTER TABLE invoices ADD COLUMN docType TEXT DEFAULT "96"'); } catch {}
 try { db.exec('ALTER TABLE invoices ADD COLUMN docNumber TEXT'); } catch {}
+try { db.exec('ALTER TABLE medical_orders ADD COLUMN therapyType TEXT DEFAULT "SUEROTERAPIA"'); } catch {}
+try { db.exec('ALTER TABLE medical_orders ADD COLUMN resource TEXT DEFAULT "Sillón 1"'); } catch {}
+try { db.exec('ALTER TABLE medical_orders ADD COLUMN sessionNumber INTEGER DEFAULT 1'); } catch {}
+try { db.exec('ALTER TABLE medical_orders ADD COLUMN totalSessions INTEGER DEFAULT 1'); } catch {}
+try { db.exec('ALTER TABLE medical_orders ADD COLUMN parameters TEXT DEFAULT "{}"'); } catch {}
+try { db.exec('ALTER TABLE medical_orders ADD COLUMN vitals TEXT DEFAULT "{}"'); } catch {}
+try { db.exec('ALTER TABLE medical_orders ADD COLUMN startedAt TEXT'); } catch {}
 
 seedDatabase(db);
 
@@ -162,6 +169,29 @@ try {
     }
   }
 } catch (e) { console.error('Seed inventory error:', e.message); }
+
+// Seed de insumos específicos de Hospital de Día y Sueroterapia
+try {
+  const workspaces = db.prepare('SELECT id FROM workspaces').all();
+  const dayHospitalSupplies = [
+    { name: 'Vitamina C Inyectable 10g / 50ml', sku: 'VIT-C-10G', category: 'Sueroterapia', quantity: 50, minQuantity: 10, unit: 'frascos', lotNumber: 'LT-VITC-24', expiryDate: '2027-12-31', notes: 'Infusiones endovenosas y terapia antioxidante' },
+    { name: 'Taurina Inyectable 200mg / 2ml', sku: 'TAU-200MG', category: 'Sueroterapia', quantity: 40, minQuantity: 10, unit: 'ampollas', lotNumber: 'LT-TAU-88', expiryDate: '2027-10-31', notes: 'Soporte cardiovascular y detox celular' },
+    { name: 'Zinc Oligoelemento 20mg', sku: 'ZIN-20MG', category: 'Sueroterapia', quantity: 40, minQuantity: 10, unit: 'ampollas', lotNumber: 'LT-ZIN-12', expiryDate: '2028-05-30', notes: 'Inmunomodulación biológica' },
+    { name: 'Selenio Oligoelemento 200mcg', sku: 'SEL-200MCG', category: 'Sueroterapia', quantity: 40, minQuantity: 10, unit: 'ampollas', lotNumber: 'LT-SEL-55', expiryDate: '2028-02-28', notes: 'Terapia antioxidante y quelación' },
+    { name: 'Manganeso Oligoelemento 20mg', sku: 'MAN-20MG', category: 'Sueroterapia', quantity: 30, minQuantity: 10, unit: 'ampollas', lotNumber: 'LT-MAN-99', expiryDate: '2028-01-15', notes: 'Complejo de oligoelementos catalizadores' },
+    { name: 'Guía de Macrogotero descartable c/filtro', sku: 'DES-GUIA-MAC', category: 'Descartables', quantity: 60, minQuantity: 15, unit: 'unidades', lotNumber: 'LT-GUI-44', expiryDate: '2029-01-01', notes: 'Infusión por goteo gravitacional' },
+    { name: 'Catéter Intravenoso 22G c/teflón', sku: 'CAT-22G', category: 'Descartables', quantity: 80, minQuantity: 20, unit: 'unidades', lotNumber: 'LT-CAT-99', expiryDate: '2028-11-30', notes: 'Acceso vascular periférico para sueroterapia' }
+  ];
+  for (const ws of workspaces) {
+    const insertSupply = db.prepare(`INSERT INTO inventory (id, workspaceId, name, sku, category, quantity, minQuantity, unit, lotNumber, expiryDate, notes, status, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const s of dayHospitalSupplies) {
+      const exists = db.prepare('SELECT id FROM inventory WHERE workspaceId=? AND sku=?').get(ws.id, s.sku);
+      if (!exists) {
+        insertSupply.run(randomUUID(), ws.id, s.name, s.sku, s.category, s.quantity, s.minQuantity, s.unit, s.lotNumber, s.expiryDate, s.notes, 'ACTIVE', new Date().toISOString(), new Date().toISOString());
+      }
+    }
+  }
+} catch (e) { console.error('Seed day hospital error:', e.message); }
 
 // Regularización de comprobantes previos sin CAE o sin número de factura
 try {
@@ -1338,7 +1368,12 @@ async function handle(req, res) {
         appointments: rows('appointments'),
         agendas: rows('agendas'),
         quotes: rows('quotes').map(q => ({ ...q, items: typeof q.items === 'string' ? JSON.parse(q.items) : (q.items || []) })),
-        medicalOrders: rows('medical_orders').map(mo => ({ ...mo, items: typeof mo.items === 'string' ? JSON.parse(mo.items) : (mo.items || []) })),
+        medicalOrders: rows('medical_orders').map(mo => ({
+          ...mo,
+          items: typeof mo.items === 'string' ? (JSON.parse(mo.items || '[]') || []) : (mo.items || []),
+          parameters: typeof mo.parameters === 'string' ? (JSON.parse(mo.parameters || '{}') || {}) : (mo.parameters || {}),
+          vitals: typeof mo.vitals === 'string' ? (JSON.parse(mo.vitals || '{}') || {}) : (mo.vitals || {})
+        })),
         leads: rows('leads').map(l => ({ ...l, aiTriage: l.aiTriage ? (typeof l.aiTriage === 'string' ? JSON.parse(l.aiTriage) : l.aiTriage) : null })),
         records: rows('records').map(r => ({ ...r, content: JSON.parse(r.content) })),
         prescriptions: rows('prescriptions'),
@@ -2185,16 +2220,27 @@ async function handle(req, res) {
       const b = await body(req);
       const p = patient(w, text(b.patientId, 'Paciente', 1, 100));
       const items = Array.isArray(b.items) ? b.items : [];
+      const therapyType = b.therapyType || 'SUEROTERAPIA';
+      const resource = b.resource || 'Sillón 1';
+      const sessionNumber = parseInt(b.sessionNumber, 10) || 1;
+      const totalSessions = parseInt(b.totalSessions, 10) || 1;
       const order = {
         id: uid(),
         workspaceId: w,
         patientId: p.id,
         doctorId: b.doctorId || u.id,
         doctorName: text(b.doctorName || u.name, 'Profesional Médico', 1, 120),
+        therapyType,
+        resource,
+        sessionNumber,
+        totalSessions,
         recordId: optional(b.recordId, 'Evolución', 100),
-        instructions: text(b.instructions, 'Indicaciones de enfermería', 1, 5000),
+        instructions: text(b.instructions || `${therapyType}: administración según protocolo`, 'Indicaciones de enfermería', 1, 5000),
         items: JSON.stringify(items),
+        parameters: typeof b.parameters === 'object' ? JSON.stringify(b.parameters) : (b.parameters || '{}'),
+        vitals: typeof b.vitals === 'object' ? JSON.stringify(b.vitals) : (b.vitals || '{}'),
         status: 'PENDING',
+        startedAt: null,
         administeredBy: null,
         administeredAt: null,
         notes: optional(b.notes, 'Notas', 1000),
@@ -2203,9 +2249,30 @@ async function handle(req, res) {
       };
       transaction(() => {
         put('medical_orders', order);
-        audit(u, 'MEDICAL_ORDER_CREATED', 'medical_order', order.id, `Indicación médica registrada para enfermería (${items.length} insumos).`);
+        audit(u, 'MEDICAL_ORDER_CREATED', 'medical_order', order.id, `Indicación de ${therapyType} (${resource}) para paciente ${p.firstName} ${p.lastName} (${items.length} insumos).`);
       });
-      return json(res, 201, { ...order, items });
+      return json(res, 201, {
+        ...order,
+        items,
+        parameters: typeof b.parameters === 'object' ? b.parameters : JSON.parse(order.parameters || '{}'),
+        vitals: typeof b.vitals === 'object' ? b.vitals : JSON.parse(order.vitals || '{}')
+      });
+    }
+
+    const medOrderCheckinMatch = path.match(/^\/api\/medical-orders\/([^/]+)\/checkin$/);
+    if (medOrderCheckinMatch && method === 'POST') {
+      const id = medOrderCheckinMatch[1];
+      const cur = q('SELECT * FROM medical_orders WHERE workspaceId=? AND id=?', w, id);
+      if (!cur) fail(404, 'Indicación médica no encontrada.');
+      const b = await body(req).catch(() => ({}));
+      const vitals = typeof b.vitals === 'object' ? JSON.stringify(b.vitals) : (cur.vitals || '{}');
+      const resource = b.resource || cur.resource || 'Sillón 1';
+      transaction(() => {
+        run('UPDATE medical_orders SET status=?, resource=?, startedAt=?, vitals=?, updatedAt=? WHERE workspaceId=? AND id=?',
+          'IN_PROGRESS', resource, now(), vitals, now(), w, id);
+        audit(u, 'HOSPITAL_DAY_CHECKIN', 'medical_order', id, `Paciente ingresó al ${resource} para inicio de sesión.`);
+      });
+      return json(res, 200, { ok: true, id, status: 'IN_PROGRESS', startedAt: now() });
     }
 
     const medOrderAdministerMatch = path.match(/^\/api\/medical-orders\/([^/]+)\/administer$/);
@@ -2213,32 +2280,71 @@ async function handle(req, res) {
       const id = medOrderAdministerMatch[1];
       const cur = q('SELECT * FROM medical_orders WHERE workspaceId=? AND id=?', w, id);
       if (!cur) fail(404, 'Indicación médica no encontrada.');
-      if (cur.status === 'ADMINISTERED') fail(400, 'Esta indicación médica ya fue administrada.');
+      if (cur.status === 'ADMINISTERED') fail(400, 'Esta sesión ya fue administrada.');
       if (cur.status === 'CANCELLED') fail(400, 'Esta indicación médica fue cancelada.');
 
+      const b = await body(req).catch(() => ({}));
       const items = typeof cur.items === 'string' ? JSON.parse(cur.items) : (cur.items || []);
       const p = q('SELECT firstName, lastName FROM patients WHERE id=?', cur.patientId);
       const pName = p ? `${p.firstName} ${p.lastName}` : 'Paciente';
+      const vitalsObj = b.vitals || (cur.vitals ? JSON.parse(cur.vitals) : {});
+      const nowTs = now();
 
+      let recId = 'rec-' + randomUUID(), digest = '';
       transaction(() => {
+        // 1. Descuento automático de inventario
         for (const item of items) {
           if (item.inventoryId) {
             const inv = q('SELECT * FROM inventory WHERE workspaceId=? AND id=?', w, item.inventoryId);
             if (inv) {
               const qtyToDiscount = Math.max(1, parseInt(item.quantity, 10) || 1);
               const newQty = Math.max(0, inv.quantity - qtyToDiscount);
-              run('UPDATE inventory SET quantity=?, updatedAt=? WHERE workspaceId=? AND id=?', newQty, now(), w, inv.id);
+              run('UPDATE inventory SET quantity=?, updatedAt=? WHERE workspaceId=? AND id=?', newQty, nowTs, w, inv.id);
               audit(u, 'INVENTORY_DISCOUNT_NURSE', 'inventory', inv.id,
-                `Descuento de ${qtyToDiscount} ${inv.unit} de "${inv.name}" administrado a paciente ${pName} (Indicación #${id.slice(0, 8)}). Stock restante: ${newQty}.`);
+                `Descuento automático de ${qtyToDiscount} ${inv.unit} de "${inv.name}" administrado a paciente ${pName} (${cur.therapyType || 'Hospital de Día'}). Stock restante: ${newQty}.`);
             }
           }
         }
-        run('UPDATE medical_orders SET status=?, administeredBy=?, administeredAt=?, updatedAt=? WHERE workspaceId=? AND id=?',
-          'ADMINISTERED', u.name, now(), now(), w, id);
-        audit(u, 'MEDICAL_ORDER_ADMINISTERED', 'medical_order', id, `Indicación administrada y stock descontado por ${u.name}.`);
+
+        // 2. Actualizar estado de la indicación
+        run('UPDATE medical_orders SET status=?, administeredBy=?, administeredAt=?, vitals=?, updatedAt=? WHERE workspaceId=? AND id=?',
+          'ADMINISTERED', u.name, nowTs, JSON.stringify(vitalsObj), nowTs, w, id);
+        audit(u, 'MEDICAL_ORDER_ADMINISTERED', 'medical_order', id, `Sesión de ${cur.therapyType || 'Hospital de Día'} finalizada y stock descontado por ${u.name}.`);
+
+        // 3. Generar evolución exclusiva para el sector de enfermería en la HCD del paciente (sin pisar consulta médica)
+        const therapyTitle = cur.therapyType ? `Hospital de Día: ${cur.therapyType} (${cur.resource || 'Sillón'})` : `Administración de Tratamiento de Enfermería`;
+        const evolutionContent = JSON.stringify({
+          title: therapyTitle,
+          therapyType: cur.therapyType || 'SUEROTERAPIA',
+          resource: cur.resource || 'Sillón 1',
+          sessionNumber: cur.sessionNumber || 1,
+          totalSessions: cur.totalSessions || 1,
+          itemsAdministered: items,
+          instructions: cur.instructions,
+          vitals: vitalsObj,
+          hrvTable: b.hrvTable || [],
+          tolerance: b.tolerance || 'Buena tolerancia al tratamiento sin intercurrencias.',
+          notes: b.notes || cur.notes || '',
+          administeredBy: u.name,
+          orderId: id,
+          recordType: 'HOSPITAL_DE_DIA'
+        });
+
+        digest = ComplianceService.computeClinicalDigest(w, cur.patientId, u.name, `${therapyTitle} ${evolutionContent}`, nowTs);
+        put('records', {
+          id: recId,
+          workspaceId: w,
+          patientId: cur.patientId,
+          type: 'HOSPITAL_DE_DIA',
+          content: evolutionContent,
+          author: `${u.name} (Enfermería · Hospital de Día)`,
+          createdAt: nowTs,
+          previousHash: 'HD-GENESIS',
+          hash: digest
+        });
       });
 
-      return json(res, 200, { ok: true, id, status: 'ADMINISTERED', administeredBy: u.name, administeredAt: now() });
+      return json(res, 200, { ok: true, id, status: 'ADMINISTERED', recordId: recId, hash: digest, administeredBy: u.name, administeredAt: nowTs });
     }
 
     const medOrderCancelMatch = path.match(/^\/api\/medical-orders\/([^/]+)\/cancel$/);

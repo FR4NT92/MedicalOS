@@ -285,4 +285,76 @@ describe('Abundance Clinic OS - Validación Integral de Software Productivo', ()
     assert.ok(updatedRes.body.appointments.some(a => a.id === bookRes.body.appointment?.id));
     assert.ok(updatedRes.body.records.some(r => r.id === uploadRes.body.id));
   });
+
+  it('11 · Hospital de Día: Indicación por sesión, sillones, check-in, evolución separada y descuento de stock', async () => {
+    // 1. Obtener insumos del inventario para sueroterapia
+    const stateRes = await req('/api/state', { session: admin });
+    assert.equal(stateRes.status, 200);
+    const vitC = stateRes.body.inventory.find(i => i.sku === 'VIT-C-10G');
+    const taurine = stateRes.body.inventory.find(i => i.sku === 'TAU-200MG');
+    assert.ok(vitC, 'Debe existir Vitamina C en el inventario');
+    const initialVitCQty = vitC.quantity;
+
+    const patient = stateRes.body.patients[0];
+    assert.ok(patient, 'Debe existir un paciente para la indicación');
+
+    // 2. El médico prescribe la indicación de sesión de Hospital de Día
+    const orderRes = await req('/api/medical-orders', {
+      method: 'POST',
+      session: admin,
+      data: {
+        patientId: patient.id,
+        therapyType: 'SUEROTERAPIA',
+        resource: 'Sillón 1',
+        sessionNumber: 1,
+        totalSessions: 5,
+        instructions: 'Pasar Vitamina C 10g + Taurina 200mg en solución fisiológica en 45 min. Control de TA.',
+        items: [
+          { inventoryId: vitC.id, name: vitC.name, dose: '10 gramos', quantity: 1 },
+          { inventoryId: taurine?.id, name: taurine?.name, dose: '200 miligramos', quantity: 1 }
+        ],
+        notes: 'Paciente con fatiga crónica post-viral.'
+      }
+    });
+    assert.equal(orderRes.status, 201);
+    const orderId = orderRes.body.id;
+    assert.equal(orderRes.body.status, 'PENDING');
+
+    // 3. El enfermero hace el Check-in al llegar el paciente (Sillón ocupado)
+    const checkinRes = await req(`/api/medical-orders/${orderId}/checkin`, {
+      method: 'POST',
+      session: admin,
+      data: {
+        resource: 'Sillón 1',
+        vitals: { bloodPressure: '120/80', heartRate: 72 }
+      }
+    });
+    assert.equal(checkinRes.status, 200);
+    assert.equal(checkinRes.body.status, 'IN_PROGRESS');
+
+    // 4. El enfermero finaliza la sesión: descuenta stock automáticamente y genera evolución exclusiva
+    const finishRes = await req(`/api/medical-orders/${orderId}/administer`, {
+      method: 'POST',
+      session: admin,
+      data: {
+        vitals: { bloodPressure: '115/75', heartRate: 70, oxygenSaturation: 99 },
+        tolerance: 'Excelente tolerancia al suero, sin flebitis.',
+        notes: 'Vía periférica retirada sin hematoma.'
+      }
+    });
+    assert.equal(finishRes.status, 200);
+    assert.ok(finishRes.body.recordId);
+    assert.ok(finishRes.body.hash, 'Debe generar firma SHA-256 inmutable para la evolución de enfermería');
+
+    // 5. Validar que el stock se descontó
+    const afterStateRes = await req('/api/state', { session: admin });
+    const afterVitC = afterStateRes.body.inventory.find(i => i.id === vitC.id);
+    assert.equal(afterVitC.quantity, initialVitCQty - 1, 'El stock de Vitamina C debe haberse descontado en 1 unidad');
+
+    // 6. Validar que la evolución existe en records, es de tipo HOSPITAL_DE_DIA y no pisa consultas médicas
+    const nursingRecord = afterStateRes.body.records.find(r => r.id === finishRes.body.recordId);
+    assert.ok(nursingRecord);
+    assert.equal(nursingRecord.type, 'HOSPITAL_DE_DIA');
+    assert.ok(nursingRecord.author.includes('Enfermería'));
+  });
 });
