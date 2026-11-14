@@ -1611,24 +1611,36 @@ function portalTabInicio(p, d, upcoming) {
     <!-- 4 Tarjetas de Acciones Rápidas -->
     <div class="portal-actions-grid">
       <div class="portal-action-card" data-action="portal-open-booking">
-        <div class="portal-action-icon">${icon('calendar', 22)}</div>
-        <b>Sacar Turno Online</b>
-        <span>Elige especialidad, médico y horario disponible</span>
+        <div class="portal-action-top">
+          <div class="portal-action-icon">${icon('calendar', 20)}</div>
+          <span class="portal-action-arrow">→</span>
+        </div>
+        <div class="portal-action-title">Sacar Turno Online</div>
+        <div class="portal-action-desc">Elige especialidad, profesional y horario de atención.</div>
       </div>
       <div class="portal-action-card" data-action="portal-tab" data-tab="recetas">
-        <div class="portal-action-icon">${icon('file', 22)}</div>
-        <b>Mis Recetas Médicas</b>
-        <span>${prescriptions.length} recetas oficiales en PDF con firma digital</span>
+        <div class="portal-action-top">
+          <div class="portal-action-icon">${icon('file', 20)}</div>
+          <span class="portal-action-arrow">→</span>
+        </div>
+        <div class="portal-action-title">Mis Recetas</div>
+        <div class="portal-action-desc">${prescriptions.length} ${prescriptions.length === 1 ? 'receta disponible' : 'recetas disponibles'} en PDF con firma digital oficial.</div>
       </div>
       <div class="portal-action-card" data-action="portal-open-upload">
-        <div class="portal-action-icon">${icon('upload', 22)}</div>
-        <b>Subir Estudio / Lab</b>
-        <span>Adjunta análisis a tu historia clínica digital</span>
+        <div class="portal-action-top">
+          <div class="portal-action-icon">${icon('upload', 20)}</div>
+          <span class="portal-action-arrow">→</span>
+        </div>
+        <div class="portal-action-title">Subir Estudios / Lab</div>
+        <div class="portal-action-desc">Adjunta análisis o informes a tu historia clínica.</div>
       </div>
       <div class="portal-action-card" data-action="portal-tab" data-tab="facturas">
-        <div class="portal-action-icon">${icon('card', 22)}</div>
-        <b>Mis Facturas ARCA</b>
-        <span>${invoices.length} comprobantes oficiales con CAE y QR</span>
+        <div class="portal-action-top">
+          <div class="portal-action-icon">${icon('card', 20)}</div>
+          <span class="portal-action-arrow">→</span>
+        </div>
+        <div class="portal-action-title">Mis Facturas</div>
+        <div class="portal-action-desc">${invoices.length} ${invoices.length === 1 ? 'comprobante oficial' : 'comprobantes oficiales'} emitidos con validación AFIP.</div>
       </div>
     </div>
 
