@@ -412,13 +412,21 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
         headers: { ...authHeaders, 'Prefer': 'return=representation' },
         body: JSON.stringify(body)
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw Error(err.message || 'Error al actualizar el estado de la clínica.');
+      }
       return res.json();
     }
     if (method === 'DELETE') {
-      await fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?id=eq.${wsId}`, {
+      const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?id=eq.${wsId}`, {
         method: 'DELETE',
         headers: authHeaders
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw Error(err.message || 'No se pudo eliminar la clínica (verifica dependencias activas).');
+      }
       return { success: true };
     }
   }
@@ -999,42 +1007,47 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
   }
 
   if (path.startsWith('/api/portal/auth/request-otp') && method === 'POST') {
-    const dni = (body?.dni || '').trim();
-    const phone = (body?.phone || '').trim();
-    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?select=*&dni=eq.${dni}&limit=1`, { headers: authHeaders }).catch(() => null);
+    const dni = (body?.dni || '').trim().replace(/\D/g, '');
+    const phoneIn = (body?.phone || '').trim().replace(/\D/g, '');
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?select=*&dni=eq.${encodeURIComponent(dni)}&limit=1`, { headers: authHeaders }).catch(() => null);
     const pats = (await res?.json?.()) || [];
     if (!pats.length) {
       return { ok: true, exists: false, message: 'No encontramos una ficha registrada con este DNI.' };
     }
     const p = pats[0];
-    const demoCode = '123456';
-    sessionStorage.setItem('portal_demo_pat_' + dni, JSON.stringify(p));
+    const patPhone = String(p.phone || '').replace(/\D/g, '');
+    if (patPhone.length >= 6 && phoneIn.length >= 6 && !patPhone.endsWith(phoneIn.slice(-6)) && !phoneIn.endsWith(patPhone.slice(-6))) {
+      throw Error('El teléfono ingresado no coincide con el registrado en tu ficha médica.');
+    }
+    const otpCode = String(Math.floor(100000 + Math.random() * 900000));
+    sessionStorage.setItem('portal_otp_' + dni, JSON.stringify({ code: otpCode, expiresAt: Date.now() + 10 * 60000, patient: p }));
     return {
       ok: true,
       exists: true,
       patientName: p.first_name || p.firstName,
-      phoneMasked: (p.phone || '').slice(-4),
-      demoCode,
-      message: 'Código de seguridad enviado por WhatsApp.'
+      phoneMasked: patPhone.slice(-4),
+      demoCode: otpCode,
+      message: 'Identidad validada por DNI y teléfono. Ingresa el código de confirmación.'
     };
   }
 
   if (path.startsWith('/api/portal/auth/verify-otp') && method === 'POST') {
-    const dni = (body?.dni || '').trim();
+    const dni = (body?.dni || '').trim().replace(/\D/g, '');
     const code = (body?.code || '').trim();
-    const patRaw = sessionStorage.getItem('portal_demo_pat_' + dni);
-    let p = patRaw ? JSON.parse(patRaw) : null;
-    if (!p) {
-      const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?select=*&dni=eq.${dni}&limit=1`, { headers: authHeaders }).catch(() => null);
-      const pats = (await res?.json?.()) || [];
-      p = pats[0];
+    const storedRaw = sessionStorage.getItem('portal_otp_' + dni);
+    const stored = storedRaw ? JSON.parse(storedRaw) : null;
+    if (!stored || stored.code !== code || Date.now() > stored.expiresAt) {
+      throw Error('El código de seguridad ingresado es incorrecto o ha expirado.');
     }
+    const p = stored.patient;
     if (!p) throw Error('Paciente no encontrado.');
+    sessionStorage.removeItem('portal_otp_' + dni);
     const token = 'ptok_' + p.id;
     return {
       token,
       patient: {
         id: p.id,
+        workspaceId: p.workspace_id || 'clinic-central',
         firstName: p.first_name || p.firstName,
         lastName: p.last_name || p.lastName,
         dni: p.dni,
@@ -1053,42 +1066,62 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       workspace_id: 'clinic-central',
       first_name: body.firstName,
       last_name: body.lastName || '',
-      dni: body.dni,
+      dni: String(body.dni || '').trim().replace(/\D/g, ''),
       phone: body.phone,
       email: body.email || '',
       coverage: body.coverage || 'Particular',
+      affiliate_number: body.affiliateNumber || null,
+      birth_date: body.birthDate || null,
       status: 'ACTIVE',
       notes: 'Registrado online vía Portal Pacientes',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
-    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients`, {
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients`, {
       method: 'POST',
       headers: { ...authHeaders, 'Prefer': 'return=representation' },
       body: JSON.stringify(newPat)
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw Error(err.message || 'Error al registrar ficha de paciente.');
+    }
     return {
       ok: true,
       token: 'ptok_' + newId,
-      patient: { ...newPat, firstName: newPat.first_name, lastName: newPat.last_name }
+      patient: { ...newPat, workspaceId: newPat.workspace_id, firstName: newPat.first_name, lastName: newPat.last_name }
     };
   }
 
   if (path === '/api/portal/data' && method === 'GET') {
     const pTok = headers['Authorization']?.slice(7) || S.portal?.token || localStorage.getItem('portal_token');
     const patId = pTok?.replace('ptok_', '');
-    const [patRes, docRes, agRes, apptRes, recRes, presRes] = await Promise.all([
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?id=eq.${patId}&limit=1`, { headers: authHeaders }),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/doctors?select=*`, { headers: authHeaders }),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/agendas?select=*`, { headers: authHeaders }).catch(() => ({ json: () => [] })),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?patient_id=eq.${patId}&order=start_at.desc`, { headers: authHeaders }),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/records?patient_id=eq.${patId}&order=created_at.desc`, { headers: authHeaders }),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/prescriptions?patient_id=eq.${patId}&order=created_at.desc`, { headers: authHeaders }).catch(() => ({ json: () => [] }))
+    const patRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?id=eq.${patId}&limit=1`, { headers: authHeaders });
+    const p = (await patRes.json())?.[0] || S.portal?.patient;
+    if (!p?.id) throw Error('Sesión de paciente expirada. Ingresa nuevamente.');
+    const wsId = p.workspace_id || p.workspaceId || 'clinic-central';
+
+    const [wsRes, docRes, agRes, apptRes, recRes, presRes, invRes, cstRes] = await Promise.all([
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?id=eq.${wsId}&limit=1`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/doctors?workspace_id=eq.${wsId}`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/agendas?workspace_id=eq.${wsId}`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?patient_id=eq.${patId}&order=start_at.desc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/records?patient_id=eq.${patId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/prescriptions?patient_id=eq.${patId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/invoices?patient_id=eq.${patId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/consents?patient_id=eq.${patId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null)
     ]);
-    const p = (await patRes.json())?.[0] || S.portal?.patient || {};
-    const doctors = (await docRes.json()) || [];
-    const agendas = (await agRes.json()) || [];
-    const appointments = ((await apptRes.json()) || []).map(a => {
+
+    const ws = (await wsRes?.json?.().catch(() => []))?.[0] || { id: wsId, name: 'Clínica Médica' };
+    const doctors = (await docRes?.json?.().catch(() => [])) || [];
+    const agendas = (await agRes?.json?.().catch(() => [])) || [];
+    const rawAppts = (await apptRes?.json?.().catch(() => [])) || [];
+    const rawRecs = (await recRes?.json?.().catch(() => [])) || [];
+    const rawPresc = (await presRes?.json?.().catch(() => [])) || [];
+    const rawInvs = (await invRes?.json?.().catch(() => [])) || [];
+    const rawCsts = (await cstRes?.json?.().catch(() => [])) || [];
+
+    const appointments = rawAppts.map(a => {
       const doc = doctors.find(d => d.id === a.doctor_id);
       return {
         id: a.id,
@@ -1103,7 +1136,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
         notes: a.notes
       };
     });
-    const records = ((await recRes.json()) || []).map(r => {
+    const records = rawRecs.map(r => {
       let parsed = {};
       try { parsed = typeof r.content === 'object' ? r.content : JSON.parse(r.content || '{}'); } catch {}
       return {
@@ -1117,16 +1150,38 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
         author: r.author
       };
     });
-    const prescriptions = ((await presRes.json()) || []).map(pr => ({
+    const prescriptions = rawPresc.map(pr => ({
       id: pr.id,
       content: pr.content,
       status: pr.status,
       createdAt: pr.created_at
     }));
+    const invoices = rawInvs.map(inv => ({
+      id: inv.id,
+      concept: inv.concept,
+      amountCents: inv.amount_cents,
+      invoiceType: inv.invoice_type,
+      invoiceNumber: inv.invoice_number,
+      cae: inv.cae,
+      caeVto: inv.cae_expiration,
+      qrUrl: inv.qr_url,
+      status: inv.status,
+      createdAt: inv.created_at
+    }));
+    const consents = rawCsts.map(c => ({
+      id: c.id,
+      title: c.title,
+      doctorName: c.doctor_name,
+      type: c.type,
+      status: c.status,
+      signedAt: c.signed_at,
+      createdAt: c.created_at
+    }));
 
     return {
       patient: {
         id: p.id,
+        workspaceId: wsId,
         firstName: p.first_name || p.firstName,
         lastName: p.last_name || p.lastName,
         dni: p.dni,
@@ -1136,64 +1191,72 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
         affiliateNumber: p.affiliate_number || p.affiliateNumber
       },
       clinic: {
-        name: 'Abundance Medical & Clinic OS',
-        specialty: 'Centro Médico Integral',
-        address: 'Av. Libertador 5900, CABA',
-        phone: '+54 11 4000-0000'
+        id: ws.id,
+        name: ws.name,
+        specialty: 'Centro Médico',
+        address: 'Sede Clínica · Consultorios Médicos',
+        phone: ''
       },
       doctors,
       agendas,
       appointments,
       prescriptions,
-      invoices: [],
+      invoices,
       records,
-      consents: []
+      consents
     };
   }
 
   if (path === '/api/portal/appointments' && method === 'POST') {
     const pTok = headers['Authorization']?.slice(7) || S.portal?.token || localStorage.getItem('portal_token');
     const patId = pTok?.replace('ptok_', '') || S.portal?.patient?.id;
+    const wsId = S.portal?.patient?.workspaceId || 'clinic-central';
     const newAppt = {
       id: 'app-' + makeId().slice(0, 8),
-      workspace_id: 'clinic-central',
+      workspace_id: wsId,
       patient_id: patId,
       doctor_id: body.doctorId,
-      agenda_id: body.agendaId || 'default',
+      agenda_id: body.agendaId || null,
       start_at: `${body.date}T${body.time}:00-03:00`,
       end_at: new Date(Date.parse(`${body.date}T${body.time}:00-03:00`) + (Number(body.duration) || 30) * 60000).toISOString(),
       duration: Number(body.duration) || 30,
-      type: body.type || 'Consulta Médica',
+      type: body.type || 'CONSULTATION',
       status: 'CONFIRMED',
       notes: body.notes || 'Turno solicitado online por el paciente',
       created_at: new Date().toISOString()
     };
-    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments`, {
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments`, {
       method: 'POST',
       headers: { ...authHeaders, 'Prefer': 'return=representation' },
       body: JSON.stringify(newAppt)
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw Error(err.message || 'No se pudo reservar el turno.');
+    }
     return { ok: true, appointment: newAppt };
   }
 
   if (path.startsWith('/api/portal/appointments/') && path.endsWith('/cancel') && method === 'POST') {
     const id = path.slice('/api/portal/appointments/'.length, -'/cancel'.length);
-    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?id=eq.${id}`, {
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?id=eq.${id}`, {
       method: 'PATCH',
       headers: authHeaders,
       body: JSON.stringify({ status: 'CANCELLED' })
     });
+    if (!res.ok) throw Error('No se pudo cancelar el turno.');
     return { ok: true };
   }
 
   if (path === '/api/portal/upload-study' && method === 'POST') {
     const pTok = headers['Authorization']?.slice(7) || S.portal?.token || localStorage.getItem('portal_token');
     const patId = pTok?.replace('ptok_', '') || S.portal?.patient?.id;
+    const wsId = S.portal?.patient?.workspaceId || 'clinic-central';
     let attachments = [];
     try { attachments = JSON.parse(body.attachmentPayload || body.attachmentsJson || '[]'); } catch {}
     const newRec = {
       id: 'rec-' + makeId().slice(0, 8),
-      workspace_id: 'clinic-central',
+      workspace_id: wsId,
       patient_id: patId,
       type: body.studyType || 'STUDY',
       content: {
@@ -1209,11 +1272,12 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       previous_hash: 'PORTAL-GENESIS',
       hash: 'sha256-' + makeId() + makeId()
     };
-    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/records`, {
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/records`, {
       method: 'POST',
       headers: { ...authHeaders, 'Prefer': 'return=representation' },
       body: JSON.stringify(newRec)
     });
+    if (!res.ok) throw Error('No se pudo subir el estudio a tu historia clínica.');
     return { ok: true, message: 'Estudio subido exitosamente a tu historia clínica.' };
   }
 
@@ -1872,9 +1936,10 @@ function loginPage(error = '') {
             <div style="height:15px"></div>
             <button class="btn-login-submit" type="submit">Ingresar a la clínica ${icon('arrow', 15)}</button>
           </form>
-          <div style="margin-top:22px;padding-top:16px;border-top:1px solid #e2e8f0;text-align:center">
-            <a href="/portal" data-nav="portal" class="text-link" style="color:#1b4c37;font-weight:600;font-size:12.5px;display:inline-flex;align-items:center;gap:6px">
-              ${icon('user', 14)} ¿Sos paciente de la clínica? <b>Ingresar a Mi Portal de Salud →</b>
+          <div style="margin-top:22px;padding-top:16px;border-top:1px solid #e2e8f0;text-align:center;display:flex;flex-direction:column;align-items:center;gap:4px">
+            <span style="font-size:12px;color:#64748b">¿Sos paciente de la clínica?</span>
+            <a href="/portal" data-nav="portal" class="text-link" style="color:#1b4c37;font-weight:700;font-size:13px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap">
+              ${icon('usercheck', 14)} Ingresar a Mi Portal de Salud →
             </a>
           </div>
         </div>
@@ -2355,11 +2420,13 @@ function portalTabInicio(p, d, upcoming) {
               <span>Lunes a Viernes: 08:00 a 20:00 hs · Sábados: 09:00 a 14:00 hs</span>
             </div>
           </div>
-          <div style="margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0">
-            <a href="https://wa.me/5491140000000" target="_blank" class="btn primary small" style="background:#15803d;display:inline-flex;align-items:center;gap:6px">
-              ${icon('chat', 13)} Contactar por WhatsApp de Secretaría
-            </a>
-          </div>
+          ${clinic.phone ? `
+            <div style="margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0">
+              <a href="https://wa.me/${esc(String(clinic.phone).replace(/\D/g, ''))}" target="_blank" class="btn primary small" style="background:#15803d;display:inline-flex;align-items:center;gap:6px">
+                ${icon('chat', 13)} Contactar por WhatsApp de Secretaría
+              </a>
+            </div>
+          ` : ''}
         </div>
       </section>
 
@@ -2489,9 +2556,9 @@ function portalTabRecetas(prescriptions) {
             </p>
             <div class="between" style="margin-top:12px">
               <span class="tiny muted">Firma Criptográfica SHA-256 e Integridad Legal</span>
-              <a href="/api/prescriptions/${r.id}/document" target="_blank" class="btn small primary" style="background:#1b4c37">
+              <button class="btn small primary" data-action="portal-print-prescription" data-id="${r.id}" style="background:#1b4c37">
                 ${icon('download', 13)} Descargar Receta Oficial (PDF)
-              </a>
+              </button>
             </div>
           </div>
         `).join('') || empty('Sin recetas médicas', 'Aún no se han emitido recetas electrónicas en tu historia clínica.')}
@@ -2567,11 +2634,11 @@ function portalTabFacturas(invoices) {
             <div class="between" style="margin-top:12px;flex-wrap:wrap">
               <div>
                 <span class="tiny muted">Importe Total:</span>
-                <b style="font-size:16px;color:#166534;margin-left:6px">${fmtMoney(inv.amountCents || inv.totalCents || 0)}</b>
+                <b style="font-size:16px;color:#166534;margin-left:6px">${fmtMoney((inv.amountCents || inv.totalCents || 0) / 100)}</b>
               </div>
-              <a href="/api/invoices/${inv.id}/document" target="_blank" class="btn small primary" style="background:#1b4c37">
+              <button class="btn small primary" data-action="portal-print-invoice" data-id="${inv.id}" style="background:#1b4c37">
                 ${icon('download', 13)} Ver Factura Oficial con QR
-              </a>
+              </button>
             </div>
           </div>
         `).join('') || empty('Sin facturas emitidas', 'Aquí aparecerán los comprobantes fiscales una vez autorizados.')}
@@ -4129,7 +4196,7 @@ function settingsView() {
         <div class="panel-header"><h2>Seguridad e Infraestructura</h2></div>
         <div class="panel-body">
           <div class="detail-label">Motor de Base de Datos</div>
-          <p class="detail-value">SQLite WAL Mode (Local de alta performance)</p>
+          <p class="detail-value">PostgreSQL Cloud Multi-Tenant con RLS (o SQLite WAL local)</p>
           <div class="spacer"></div>
           <div class="detail-label">Criptografía</div>
           <p class="detail-value">SHA-256 Hash Chain para historias clínicas inmutables</p>
@@ -5029,10 +5096,10 @@ function printQuoteDocument(id) {
 }
 
 function printInvoiceDocument(id) {
-  const inv = (S.data?.invoices || []).find(i => i.id === id);
+  const inv = (S.data?.invoices || S.portal?.data?.invoices || []).find(i => i.id === id);
   if (!inv) return toast('Comprobante no encontrado.', true);
-  const p = patientBy(inv.patientId);
-  const clinicName = S.data?.workspace?.name || 'Abundance Clinic OS';
+  const p = patientBy(inv.patientId) || S.portal?.patient;
+  const clinicName = S.data?.workspace?.name || S.portal?.data?.clinic?.name || 'Abundance Clinic OS';
   const amountFmt = fmtMoney((inv.amountCents || 0) / 100);
   const win = window.open('', '_blank');
   if (!win) return toast('Habilita las ventanas emergentes para ver o imprimir la factura.', true);
@@ -5057,11 +5124,44 @@ function printInvoiceDocument(id) {
       </div>
       <div style="padding:12px 0;border-bottom:1px solid #e2e8f0;font-size:13px"><b>Paciente:</b> ${esc(nameOf(p))} · <b>DNI:</b> ${esc(p?.dni || 'Consumidor Final')}</div>
       <table><thead><tr><th>Concepto</th><th style="text-align:right">Importe</th></tr></thead>
-      <tbody><tr><td>${esc(inv.concept)}</td><td style="text-align:right"><b>${amountFmt}</b></td></tr></tbody></table>
+      <tbody><tr><td>${esc(inv.concept || 'Prestación médica')}</td><td style="text-align:right"><b>${amountFmt}</b></td></tr></tbody></table>
       <div style="display:flex;justify-content:space-between;align-items:center;background:#f4f8f4;padding:14px;border-radius:6px;margin-top:16px">
         <div><b style="color:#15803d">✓ AUTORIZADO POR ARCA (AFIP)</b><br><small>CAE N°: ${esc(inv.cae || '—')} · Vto: ${fmtDate(inv.caeVto || inv.createdAt, true)}</small></div>
         ${inv.qrUrl ? `<img src="https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=${encodeURIComponent(inv.qrUrl)}" width="90" height="90" alt="QR ARCA">` : ''}
       </div>
+    </div>
+  </div></body></html>`);
+  win.document.close();
+}
+
+function printPrescriptionDocument(id) {
+  const rx = (S.data?.prescriptions || S.portal?.data?.prescriptions || []).find(r => r.id === id);
+  if (!rx) return toast('Receta médica no encontrada.', true);
+  const p = patientBy(rx.patientId) || S.portal?.patient;
+  const clinicName = S.data?.workspace?.name || S.portal?.data?.clinic?.name || 'Abundance Clinic OS';
+  const win = window.open('', '_blank');
+  if (!win) return toast('Habilita las ventanas emergentes para ver o imprimir la receta.', true);
+  win.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Receta Electrónica ${esc(rx.id)}</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#1a2f26;margin:0;padding:30px;background:#f6f8f6}
+    .page{max-width:720px;margin:0 auto;background:#fff;padding:34px;border-radius:10px;border:1px solid #d4ded6}
+    .btn{padding:9px 16px;border-radius:6px;border:none;background:#1b4c37;color:#fff;font-weight:600;cursor:pointer}
+    .header{border-bottom:2px solid #1b4c37;padding-bottom:14px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center}
+    .rx-body{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:20px;font-size:14px;white-space:pre-wrap;line-height:1.7;min-height:160px;margin:18px 0}
+    @media print{.actions{display:none}body{background:#fff;padding:0}.page{border:none}}
+  </style></head><body><div class="page">
+    <div class="actions" style="text-align:right;margin-bottom:14px"><button class="btn" onclick="window.print()">Imprimir / Guardar PDF</button></div>
+    <div class="header">
+      <div><strong style="font-size:20px;color:#1b4c37">${esc(clinicName)}</strong><br><small>Receta Médica Electrónica (Ley 27.553)</small></div>
+      <div style="text-align:right"><small>Fecha: ${fmtDate(rx.createdAt, true)}</small><br><small>Ref: ${esc(rx.id)}</small></div>
+    </div>
+    <div style="font-size:13px;padding:10px 14px;background:#f4f8f4;border-radius:6px">
+      <b>Paciente:</b> ${esc(nameOf(p))} · <b>DNI:</b> ${esc(p?.dni || '—')} · <b>Cobertura:</b> ${esc(p?.coverage || 'Particular')}
+    </div>
+    <div class="rx-body">${esc(rx.content)}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #e2e8f0;padding-top:14px;font-size:11.5px;color:#5a7364">
+      <span>✓ Receta Electrónica emitida con firma digital e integridad verificable.</span>
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=75x75&data=${encodeURIComponent(`RX:${rx.id}|DNI:${p?.dni || ''}|DATE:${rx.createdAt}`)}" width="75" height="75" alt="QR Receta">
     </div>
   </div></body></html>`);
   win.document.close();
@@ -5133,21 +5233,28 @@ function quoteForm(patientId = null) {
   }, 50);
 }
 
-function viewAttachmentModal(recordId, fileIdx = 0) {
-  const r = S.data.records.find(x => x.id === recordId);
-  const att = r?.content?.attachments?.[fileIdx];
-  if (!att) return;
-  const isPdf = att.type === 'application/pdf' || att.name.endsWith('.pdf');
-  showModal(att.name, `${r.content?.title || r.content?.problem || 'Documento adjunto'} · ${fmtDate(r.createdAt, true)}`,
+function viewAttachmentModal(recordIdOrUrl, fileIdxOrName = 0, explicitType = '') {
+  let att = null;
+  let subtitle = 'Documento adjunto';
+  if (typeof recordIdOrUrl === 'string' && (recordIdOrUrl.startsWith('data:') || recordIdOrUrl.startsWith('http') || recordIdOrUrl.startsWith('blob:'))) {
+    att = { data: recordIdOrUrl, name: String(fileIdxOrName || 'Archivo adjunto'), type: explicitType || '' };
+  } else {
+    const r = (S.data?.records || S.portal?.data?.records || []).find(x => x.id === recordIdOrUrl);
+    att = r?.content?.attachments?.[fileIdxOrName] || r?.attachments?.[fileIdxOrName];
+    if (r) subtitle = `${r.content?.title || r.content?.problem || r.title || 'Documento adjunto'} · ${fmtDate(r.createdAt, true)}`;
+  }
+  if (!att?.data) return toast('Archivo adjunto no disponible.', true);
+  const isPdf = att.type === 'application/pdf' || (att.name || '').toLowerCase().endsWith('.pdf') || att.data.startsWith('data:application/pdf');
+  showModal(att.name || 'Archivo adjunto', subtitle,
     `<div style="text-align:center;margin-bottom:12px">
       ${isPdf
         ? `<iframe src="${att.data}" style="width:100%;height:500px;border:1px solid #cbd5e1;border-radius:8px"></iframe>`
-        : `<img src="${att.data}" style="max-width:100%;max-height:500px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)" alt="${esc(att.name)}">`
+        : `<img src="${att.data}" style="max-width:100%;max-height:500px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)" alt="${esc(att.name || 'Adjunto')}">`
       }
     </div>
     <div class="dialog-actions">
       <button class="btn" data-action="close-modal">Cerrar</button>
-      <a href="${att.data}" download="${esc(att.name)}" class="btn primary">${icon('download', 14)} Descargar Archivo</a>
+      <a href="${att.data}" download="${esc(att.name || 'archivo')}" class="btn primary">${icon('download', 14)} Descargar Archivo</a>
     </div>`,
     '', 'wide'
   );
@@ -6538,6 +6645,12 @@ document.addEventListener('click', async e => {
         portalUploadDialog();
         break;
       }
+      case 'portal-print-prescription':
+        printPrescriptionDocument(id);
+        break;
+      case 'portal-print-invoice':
+        printInvoiceDocument(id);
+        break;
       case 'portal-cancel-appointment': {
         if (confirm('¿Confirmas que deseas cancelar este turno?')) {
           el.disabled = true;
