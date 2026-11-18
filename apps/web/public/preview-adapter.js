@@ -242,7 +242,24 @@ async function handler(path,method='GET',b={},headers={}){
    persist();
    return clone(it);
   }
- if(path==='/api/settings'&&method==='PATCH'){for(const k of ['pauseAssistant','pauseWebhooks','pauseBilling'])if(typeof b[k]==='boolean')state.settings[k]=b[k];audit('SETTINGS_UPDATED','settings','clinic-demo');persist();return clone(state.settings);}
+  if(path==='/api/quotes'&&method==='POST'){
+   needPatient(b.patientId);
+   if(!state.quotes)state.quotes=[];
+   const items=Array.isArray(b.items)?b.items:[];
+   const discount=Number(b.discount||0);
+   const subtotal=items.reduce((s,it)=>s+(Number(it.quantity||1)*Number(it.unitPrice||0)),0);
+   const total=Math.max(0,subtotal-(subtotal*(discount/100)));
+   const q={id:uid(),workspaceId:'clinic-demo',patientId:b.patientId,doctorId:b.doctorId||null,number:`PRE-${new Date().getFullYear()}-${String(state.quotes.length+1).padStart(4,'0')}`,title:text(b.title,'Título',1,200),items,subtotal,discount,total,currency:b.currency||'ARS',validUntil:b.validUntil||dateKey(),status:'PENDING',notes:b.notes||'',createdAt:now(),updatedAt:now()};
+   state.quotes.unshift(q);audit('QUOTE_CREATED','quote',q.id);persist();return clone(q);
+  }
+  if(path.startsWith('/api/quotes/')&&method==='PATCH'){
+   const q=(state.quotes||[]).find(x=>x.id===path.split('/').pop());if(!q)fail('Presupuesto no encontrado.',404);
+   if(b.status)q.status=b.status;q.updatedAt=now();persist();return clone(q);
+  }
+  if(path.startsWith('/api/quotes/')&&method==='DELETE'){
+   const id=path.split('/').pop();state.quotes=(state.quotes||[]).filter(x=>x.id!==id);persist();return {ok:true,id};
+  }
+  if(path==='/api/settings'&&method==='PATCH'){for(const k of ['pauseAssistant','pauseWebhooks','pauseBilling'])if(typeof b[k]==='boolean')state.settings[k]=b[k];audit('SETTINGS_UPDATED','settings','clinic-demo');persist();return clone(state.settings);}
  if(path==='/api/copilot'&&method==='POST'){
   if(state.settings.pauseAssistant)fail('El asistente está pausado desde Configuración.',409,'PAUSED');
   const command=text(b.text,'Mensaje',1,1000).toLowerCase(),a=state.appointments.filter(a=>dateKey(a.startAt)===dateKey()&&a.status!=='CANCELLED');

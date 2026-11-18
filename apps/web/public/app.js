@@ -870,6 +870,14 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     }).catch(() => {});
     return { success: true };
   }
+  if (qtPatchMatch && method === 'DELETE') {
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/quotes?id=eq.${qtPatchMatch[1]}&workspace_id=eq.${currentWorkspaceId}`, {
+      method: 'DELETE',
+      headers: authHeaders
+    });
+    if (!res.ok) throw Error('No se pudo eliminar el presupuesto.');
+    return { ok: true };
+  }
 
   if (path === '/api/patients' && method === 'POST') {
     const newPat = {
@@ -3869,7 +3877,7 @@ function billingView() {
   const total = S.data.payments.reduce((s, p) => s + p.amountCents / 100, 0),
     drafts = S.data.invoices.reduce((s, p) => s + p.amountCents / 100, 0),
     quotes = S.data.quotes || [],
-    totalQuotes = quotes.reduce((s, q) => s + (q.totalCents || 0) / 100, 0);
+    totalQuotes = quotes.reduce((s, q) => s + (q.totalCents != null ? q.totalCents / 100 : Number(q.total || 0)), 0);
 
   const currentTab = S.billingTab || 'payments';
   const arcaInteg = (S.data?.integrations || []).find(i => i.id === 'arca');
@@ -3899,18 +3907,21 @@ function billingView() {
             const pName = nameOf(pat);
             const statusColor = q.status === 'APPROVED' ? 'green' : q.status === 'REJECTED' ? 'red' : 'amber';
             const statusLabel = q.status === 'APPROVED' ? 'Aprobado' : q.status === 'REJECTED' ? 'Rechazado' : 'Pendiente';
+            const qTotal = q.totalCents != null ? q.totalCents / 100 : Number(q.total || 0);
+            const qNum = q.quoteNumber || q.number || q.id.slice(0, 8);
             return `<tr>
               <td>${fmtDate(q.createdAt, true)}<div class="tiny muted">Vence: ${fmtDate(q.validUntil, true)}</div></td>
-              <td><strong>${esc(q.quoteNumber || q.id.slice(0, 8))}</strong></td>
+              <td><strong>${esc(qNum)}</strong></td>
               <td><strong>${esc(pName)}</strong><div class="tiny muted">${esc(pat?.coverage || 'Particular')}</div></td>
               <td><strong>${esc(q.title)}</strong><div class="tiny muted">${(q.items || []).length} ítem(s) detallado(s)</div></td>
-              <td><strong>${fmtMoney((q.totalCents || 0) / 100)}</strong></td>
+              <td><strong>${fmtMoney(qTotal)}</strong></td>
               <td><span class="badge ${statusColor}">${statusLabel}</span></td>
               <td>
                 <div style="display:flex;gap:6px;justify-content:flex-end">
-                  <a href="/api/quotes/${q.id}/document" target="_blank" class="btn small" title="Ver / Descargar Presupuesto en PDF e imprimir">${icon('file', 13)} Ver PDF</a>
+                  <button class="btn small" data-action="print-quote" data-id="${q.id}" title="Ver / Descargar Presupuesto en PDF e imprimir">${icon('file', 13)} Ver PDF</button>
                   <button class="btn small" data-action="share-quote-wa" data-id="${q.id}" title="Enviar Presupuesto por WhatsApp">${icon('phone', 13)} WhatsApp</button>
                   ${q.status !== 'APPROVED' ? `<button class="btn small primary" data-action="approve-quote" data-id="${q.id}" title="Marcar presupuesto como Aprobado">${icon('checkcircle', 13)} Aprobar</button>` : ''}
+                  <button class="btn small danger" data-action="delete-quote" data-id="${q.id}" title="Eliminar presupuesto">${icon('close', 13)} Eliminar</button>
                 </div>
               </td>
             </tr>`;
@@ -3960,7 +3971,7 @@ function billingView() {
               </td>
               <td>
                 <div style="display:flex;gap:6px;justify-content:flex-end">
-                  <a href="/api/invoices/${r.id}/document" target="_blank" class="btn small" title="Ver / Descargar comprobante oficial e imprimir">${icon('file', 13)} Ver Factura</a>
+                  <button class="btn small" data-action="print-invoice" data-id="${r.id}" title="Ver / Descargar comprobante oficial e imprimir">${icon('file', 13)} Ver Factura</button>
                   <button class="btn small" data-action="share-invoice-wa" data-id="${r.id}" title="Compartir comprobante por WhatsApp">${icon('phone', 13)} WhatsApp</button>
                 </div>
               </td>
@@ -4958,6 +4969,102 @@ function vitalsDialog(patientId = null) {
     area('Observaciones clínicas adicionales', 'notes', '', 'placeholder="Detalle o síntomas durante la toma de signos..."'),
     'Guardar Signos Vitales'
   );
+}
+
+function printQuoteDocument(id) {
+  const qt = (S.data?.quotes || []).find(q => q.id === id);
+  if (!qt) return toast('Presupuesto no encontrado.', true);
+  const p = patientBy(qt.patientId);
+  const doc = qt.doctorId ? doctorBy(qt.doctorId) : null;
+  const clinicName = S.data?.workspace?.name || 'Abundance Clinic OS';
+  const items = Array.isArray(qt.items) ? qt.items : [];
+  const subtotal = Number(qt.subtotal || items.reduce((a, it) => a + (Number(it.quantity || 1) * Number(it.unitPrice || 0)), 0));
+  const discount = Number(qt.discount || 0);
+  const total = qt.totalCents != null ? qt.totalCents / 100 : Number(qt.total || Math.max(0, subtotal - (subtotal * discount / 100)));
+  const qNum = qt.quoteNumber || qt.number || qt.id;
+  const curr = qt.currency || 'ARS';
+
+  const win = window.open('', '_blank');
+  if (!win) return toast('Habilita las ventanas emergentes para ver o imprimir el PDF.', true);
+  win.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Presupuesto ${esc(qNum)}</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#1a2f26;margin:0;padding:32px;background:#f8faf8;line-height:1.5}
+    .page{max-width:780px;margin:0 auto;background:#fff;padding:36px;border-radius:10px;border:1px solid #dce6dd;box-shadow:0 4px 20px rgba(0,0,0,0.06)}
+    .actions{display:flex;justify-content:flex-end;gap:10px;margin-bottom:20px}
+    .btn{padding:9px 16px;border-radius:6px;border:1px solid #cbd5e1;background:#1b4c37;color:#fff;font-weight:600;cursor:pointer;font-size:13px}
+    .header{border-bottom:2px solid #1b4c37;padding-bottom:16px;margin-bottom:22px;display:flex;justify-content:space-between;align-items:flex-start}
+    .patient-box{background:#f4f8f4;border:1px solid #dce8db;border-radius:8px;padding:14px 18px;margin-bottom:22px;display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px}
+    table{width:100%;border-collapse:collapse;margin-bottom:22px}
+    th{text-align:left;padding:10px 12px;background:#eef5f0;color:#1b4c37;font-size:12.5px;border-bottom:2px solid #cbd5e1}
+    td{padding:11px 12px;border-bottom:1px solid #e2e8f0;font-size:13px}
+    .totals{margin-left:auto;width:280px;font-size:13.5px}
+    .totals div{display:flex;justify-content:space-between;padding:5px 0}
+    .grand{font-size:16px;font-weight:800;color:#1b4c37;border-top:2px solid #1b4c37;margin-top:6px;padding-top:8px}
+    @media print{.actions{display:none}body{background:#fff;padding:0}.page{border:none;box-shadow:none;padding:10px}}
+  </style></head><body>
+  <div class="page">
+    <div class="actions"><button class="btn" onclick="window.print()">Imprimir / Guardar PDF</button></div>
+    <div class="header">
+      <div><div style="font-size:22px;font-weight:800;color:#1b4c37">${esc(clinicName)}</div><div style="font-size:12px;color:#5a7364">Presupuesto Médico Clínico</div></div>
+      <div style="text-align:right"><div style="font-size:18px;font-weight:700;color:#1b4c37">PRESUPUESTO ${esc(qNum)}</div><div style="font-size:12px;color:#5a7364">Fecha: ${fmtDate(qt.createdAt, true)} · Válido hasta: ${fmtDate(qt.validUntil, true)}</div></div>
+    </div>
+    <div class="patient-box">
+      <div><b>Paciente:</b> ${esc(nameOf(p))}<br><b>DNI:</b> ${esc(p?.dni || '—')}<br><b>Cobertura:</b> ${esc(p?.coverage || 'Particular')}</div>
+      <div><b>Tratamiento:</b> ${esc(qt.title)}<br><b>Profesional:</b> ${esc(doc?.name || 'Equipo Médico')}<br><b>Estado:</b> ${esc(qt.status || 'PENDING')}</div>
+    </div>
+    <table><thead><tr><th>Descripción</th><th style="text-align:center">Cant.</th><th style="text-align:right">Precio Unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
+    <tbody>${items.map(it => {
+      const qty = Number(it.quantity || 1);
+      const up = Number(it.unitPrice || 0);
+      return `<tr><td>${esc(it.description)}</td><td style="text-align:center">${qty}</td><td style="text-align:right">${curr} $${up.toLocaleString('es-AR')}</td><td style="text-align:right"><b>${curr} $${(qty * up).toLocaleString('es-AR')}</b></td></tr>`;
+    }).join('')}</tbody></table>
+    <div class="totals">
+      <div><span>Subtotal:</span><span>${curr} $${subtotal.toLocaleString('es-AR')}</span></div>
+      ${discount ? `<div><span>Bonificación (${discount}%):</span><span>- ${curr} $${(subtotal * discount / 100).toLocaleString('es-AR')}</span></div>` : ''}
+      <div class="grand"><span>TOTAL:</span><span>${curr} $${total.toLocaleString('es-AR')}</span></div>
+    </div>
+    ${qt.notes ? `<div style="margin-top:24px;padding:12px 16px;background:#f8fafc;border-left:3px solid #1b4c37;font-size:12.5px;color:#334155"><b>Condiciones y Notas:</b><br>${esc(qt.notes)}</div>` : ''}
+  </div></body></html>`);
+  win.document.close();
+}
+
+function printInvoiceDocument(id) {
+  const inv = (S.data?.invoices || []).find(i => i.id === id);
+  if (!inv) return toast('Comprobante no encontrado.', true);
+  const p = patientBy(inv.patientId);
+  const clinicName = S.data?.workspace?.name || 'Abundance Clinic OS';
+  const amountFmt = fmtMoney((inv.amountCents || 0) / 100);
+  const win = window.open('', '_blank');
+  if (!win) return toast('Habilita las ventanas emergentes para ver o imprimir la factura.', true);
+  win.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Factura ${esc(inv.invoiceType || 'B')} ${esc(inv.invoiceNumber || '')}</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#1a2f26;margin:0;padding:30px;background:#f6f8f6}
+    .page{max-width:780px;margin:0 auto;background:#fff;padding:30px;border-radius:8px;border:1px solid #d4ded6}
+    .btn{padding:9px 16px;border-radius:6px;border:none;background:#1b4c37;color:#fff;font-weight:600;cursor:pointer}
+    .box{border:1px solid #b8c9bc;padding:20px;margin-top:16px}
+    .head{display:grid;grid-template-columns:1fr 70px 1fr;gap:12px;border-bottom:2px solid #1b4c37;padding-bottom:16px}
+    .letra{width:54px;height:54px;border:2px solid #1b4c37;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:900;margin:0 auto}
+    table{width:100%;border-collapse:collapse;margin:20px 0}
+    th,td{padding:10px;border-bottom:1px solid #e2e8f0;font-size:13px;text-align:left}
+    @media print{.actions{display:none}body{background:#fff;padding:0}.page{border:none}}
+  </style></head><body><div class="page">
+    <div class="actions" style="text-align:right"><button class="btn" onclick="window.print()">Imprimir / Guardar PDF</button></div>
+    <div class="box">
+      <div class="head">
+        <div><strong style="font-size:18px;color:#1b4c37">${esc(clinicName)}</strong><br><small>Prestaciones de Salud · IVA Exento</small></div>
+        <div style="text-align:center"><div class="letra">${esc(inv.invoiceType || 'B')}</div><small>COD. ${inv.invoiceType === 'C' ? '011' : '006'}</small></div>
+        <div style="text-align:right"><strong>FACTURA ${esc(inv.invoiceType || 'B')}</strong><br>N° ${esc(inv.invoiceNumber || '')}<br><small>Fecha: ${fmtDate(inv.createdAt, true)}</small></div>
+      </div>
+      <div style="padding:12px 0;border-bottom:1px solid #e2e8f0;font-size:13px"><b>Paciente:</b> ${esc(nameOf(p))} · <b>DNI:</b> ${esc(p?.dni || 'Consumidor Final')}</div>
+      <table><thead><tr><th>Concepto</th><th style="text-align:right">Importe</th></tr></thead>
+      <tbody><tr><td>${esc(inv.concept)}</td><td style="text-align:right"><b>${amountFmt}</b></td></tr></tbody></table>
+      <div style="display:flex;justify-content:space-between;align-items:center;background:#f4f8f4;padding:14px;border-radius:6px;margin-top:16px">
+        <div><b style="color:#15803d">✓ AUTORIZADO POR ARCA (AFIP)</b><br><small>CAE N°: ${esc(inv.cae || '—')} · Vto: ${fmtDate(inv.caeVto || inv.createdAt, true)}</small></div>
+        ${inv.qrUrl ? `<img src="https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=${encodeURIComponent(inv.qrUrl)}" width="90" height="90" alt="QR ARCA">` : ''}
+      </div>
+    </div>
+  </div></body></html>`);
+  win.document.close();
 }
 
 function quoteForm(patientId = null) {
@@ -6156,11 +6263,24 @@ document.addEventListener('click', async e => {
         break;
       }
       case 'new-quote':
-        quoteForm({ patientId: el.dataset.patientId || S.selectedPatient });
+        quoteForm(el.dataset.patientId || S.selectedPatient);
         break;
       case 'print-quote':
-        window.open('/api/quotes/' + id + '/document', '_blank');
+        printQuoteDocument(id);
         break;
+      case 'print-invoice':
+        printInvoiceDocument(id);
+        break;
+      case 'delete-quote': {
+        const qt = (S.data?.quotes || []).find(x => x.id === id);
+        if (confirm(`¿Confirma eliminar el presupuesto "${qt?.title || qt?.number || id}"?`)) {
+          await api('/api/quotes/' + id, 'DELETE');
+          await refresh();
+          contentOnly();
+          toast('Presupuesto eliminado correctamente.');
+        }
+        break;
+      }
       case 'share-quote-wa': {
         try {
           const res = await api('/api/quotes/' + id + '/whatsapp', 'POST', {});
@@ -6506,16 +6626,21 @@ document.addEventListener('submit', async e => {
         message = 'Nueva agenda paralela creada correctamente.';
         break;
       case 'quote': {
-        let items = [];
-        try { items = JSON.parse(b.itemsJson || '[]'); } catch {}
+        const rows = Array.from(form.querySelectorAll('.quote-item-row'));
+        const items = rows.map(row => ({
+          description: row.querySelector('.quote-desc')?.value?.trim() || '',
+          quantity: Math.max(1, Number(row.querySelector('.quote-qty')?.value || 1)),
+          unitPrice: Math.max(0, Number(row.querySelector('.quote-price')?.value || 0))
+        })).filter(it => it.description);
+        if (!items.length) throw new Error('Agrega al menos un ítem con descripción al presupuesto.');
         await api('/api/quotes', 'POST', {
           patientId: b.patientId,
+          doctorId: b.doctorId || null,
           title: b.title,
-          doctorName: b.doctorName,
-          validDays: Number(b.validDays) || 30,
+          currency: b.currency || 'ARS',
+          validUntil: b.validUntil || plusDays(dateKey(), 15),
+          discount: Number(b.discount || b.discountPercent || 0),
           notes: b.notes || '',
-          paymentTerms: b.paymentTerms || '',
-          discountPercent: Number(b.discountPercent) || 0,
           items
         });
         S.view = 'billing';

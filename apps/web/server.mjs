@@ -1544,6 +1544,14 @@ async function handle(req, res) {
       }
       return json(res, 200, { success: true });
     }
+    if (qtePatchMatch && method === 'DELETE') {
+      const qId = qtePatchMatch[1];
+      const existing = q('SELECT * FROM quotes WHERE workspaceId=? AND id=?', w, qId);
+      if (!existing) fail(404, 'Presupuesto no encontrado.');
+      run('DELETE FROM quotes WHERE workspaceId=? AND id=?', w, qId);
+      audit(u, 'QUOTE_DELETED', 'quote', qId, `Presupuesto ${existing.number || qId} eliminado.`);
+      return json(res, 200, { ok: true, id: qId });
+    }
 
     // Enviar recordatorio de turno por WhatsApp
     const waRemindMatch = path.match(/^\/api\/appointments\/([^/]+)\/whatsapp-reminder$/);
