@@ -144,13 +144,31 @@ describe('Abundance Clinic OS - Validación Integral de Software Productivo', ()
     assert.ok(docRes.body.includes('api.qrserver.com'));
   });
 
-  it('06 · Emisión de Factura Oficial con CAE y QR RG 4291/4597 de ARCA', async () => {
+  it('06 · Emisión de Factura Oficial con CAE y QR RG 4291/4597 de ARCA (Requiere Conexión Activa)', async () => {
     const invData = {
       patientId: 'patient-1',
       concept: 'Honorarios Médicos Consulta Especializada',
       amount: 45000,
       invoiceType: 'B'
     };
+
+    // 1. Debe rechazar la emisión si ARCA no está conectada
+    const rejectedRes = await req('/api/invoices', { method: 'POST', session: admin, data: invData });
+    assert.equal(rejectedRes.status, 400);
+    assert.ok(rejectedRes.body.error.includes('no está conectada'));
+
+    // 2. Conectar e integrar canal oficial ARCA con credenciales fiscales válidas
+    const connectRes = await req('/api/admin/integrations/arca', {
+      method: 'POST',
+      session: superadmin,
+      data: {
+        status: 'CONNECTED',
+        config: { cuit: '30718293849', puntoVenta: '0001', ambiente: 'homologacion' }
+      }
+    });
+    assert.equal(connectRes.status, 200);
+
+    // 3. Emisión exitosa de factura oficial con CAE y QR
     const res = await req('/api/invoices', { method: 'POST', session: admin, data: invData });
     assert.equal(res.status, 201);
     assert.equal(res.body.status, 'ISSUED');
@@ -356,5 +374,42 @@ describe('Abundance Clinic OS - Validación Integral de Software Productivo', ()
     assert.ok(nursingRecord);
     assert.equal(nursingRecord.type, 'HOSPITAL_DE_DIA');
     assert.ok(nursingRecord.author.includes('Enfermería'));
+  });
+
+  it('12 · Importación masiva de padrón de pacientes (CSV / Excel)', async () => {
+    const importPayload = {
+      rows: [
+        {
+          dni: '39888777',
+          firstName: 'Carolina',
+          lastName: 'Méndez',
+          phone: '+5491133334444',
+          email: 'carolina.mendez@test.com',
+          coverage: 'OSDE 310',
+          nroAfiliado: '3-9888777-1',
+          birthDate: '1995-07-14',
+          allergies: 'Ibuprofeno',
+          patologias: 'Migraña con aura'
+        },
+        {
+          dni: '38111222',
+          firstName: 'Esteban',
+          lastName: 'Quaranta',
+          phone: '+5491177778888',
+          email: 'esteban.q@test.com',
+          coverage: 'Swiss Medical',
+          nroAfiliado: 'SM-449102'
+        }
+      ]
+    };
+    const res = await req('/api/migration/import', { method: 'POST', session: admin, data: importPayload });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.imported, 2);
+
+    const state = await req('/api/state', { session: admin });
+    const p1 = state.body.patients.find(p => p.dni === '39888777');
+    assert.ok(p1, 'El paciente importado debe existir en el padrón');
+    assert.equal(p1.firstName, 'Carolina');
+    assert.equal(p1.lastName, 'Méndez');
   });
 });

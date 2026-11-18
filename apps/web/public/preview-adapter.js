@@ -104,7 +104,144 @@ async function handler(path,method='GET',b={},headers={}){
   if(!k)fail('Falta clave de operación.');const prev=state.payments.find(p=>p.idempotencyKey===k);if(prev){if(['patientId','amountCents','method','reference'].some(x=>prev[x]!==p[x]))fail('La operación ya existe con otros datos.',409);return clone({...prev,replayed:true});}
   state.payments.unshift(p);audit('DEMO_PAYMENT_RECORDED','payment',p.id,'Registro de prueba sin acreditación verificada.');persist();return clone(p);
  }
- if(path==='/api/invoices'&&method==='POST'){needPatient(b.patientId);const r={id:uid(),workspaceId:'clinic-demo',patientId:b.patientId,concept:text(b.concept,'Concepto',1,500),amountCents:amount(b.amount),status:'DRAFT',createdAt:now()};state.invoices.unshift(r);audit('INVOICE_DRAFT_CREATED','invoice',r.id);persist();return clone(r);}
+  if(path==='/api/invoices'&&method==='POST'){
+   const arca = (state.integrations || []).find(i => i.id === 'arca');
+   if(!arca || arca.status !== 'CONNECTED'){
+     fail('La integración oficial con ARCA (ex AFIP) no está conectada. Configura tus credenciales fiscales en Integraciones antes de emitir comprobantes.', 400, 'INTEGRATION_NOT_CONNECTED');
+   }
+   needPatient(b.patientId);
+   const p = state.patients.find(x => x.id === b.patientId);
+   const invType = (b.invoiceType === 'C' || b.invoiceType === 'Factura C') ? 'C' : 'B';
+   const seq = String((state.invoices || []).length + 1).padStart(8, '0');
+   const cae = String(BigInt('7' + Math.floor(Math.random() * 900000000000 + 100000000000)));
+   const caeVto = new Date(Date.now() + 10 * 86400000).toISOString();
+   const r = {
+     id: uid(),
+     workspaceId: 'clinic-demo',
+     patientId: b.patientId,
+     concept: text(b.concept, 'Concepto', 1, 500),
+     amountCents: amount(b.amount),
+     invoiceType: invType,
+     invoiceNumber: `00001-${seq}`,
+     docType: '96',
+     docNumber: p?.dni || '',
+     cae,
+     caeVto,
+     qrUrl: `https://www.afip.gob.ar/fe/qr/?p=${btoa(JSON.stringify({ ver: 1, cuit: 30718293849, ptoVta: 1, nroCmp: Number(seq), cae: Number(cae) }))}`,
+     status: 'ISSUED',
+     createdAt: now()
+   };
+   state.invoices.unshift(r);
+   audit('INVOICE_CREATED', 'invoice', r.id, `Factura ${invType} N° ${r.invoiceNumber} emitida con CAE ${cae}.`);
+   persist();
+   return clone(r);
+  }
+  if(path==='/api/migration/import'&&method==='POST'){
+   const rows = Array.isArray(b.rows) ? b.rows : [];
+   if (!rows.length) fail('No se proporcionaron filas para importar.', 400);
+   let imported = 0, updated = 0;
+   for (const row of rows) {
+     const rawDni = String(row.dni || row.documento || row.DNI || '').trim().replace(/\D/g, '');
+     const rawPhone = String(row.phone || row.telefono || row.celular || '').trim();
+     const cleanPhone = rawPhone ? rawPhone.replace(/[\s()-]/g, '') : `+54911${Math.floor(10000000 + Math.random() * 90000000)}`;
+     const firstName = text(row.firstName || row.nombre || row.Nombre || 'Paciente', 'Nombre', 1, 80);
+     const lastName = text(row.lastName || row.apellido || row.Apellido || 'Sin Apellido', 'Apellido', 1, 80);
+     const coverage = text(row.coverage || row.obraSocial || row.prepaga || 'Particular', 'Cobertura', 1, 100);
+     let existing = rawDni ? state.patients.find(p => p.dni === rawDni) : null;
+     if (!existing && cleanPhone) existing = state.patients.find(p => p.phone === cleanPhone);
+     if (existing) {
+       Object.assign(existing, { firstName, lastName, coverage, updatedAt: now() });
+       updated++;
+     } else {
+       const newP = {
+         id: uid(),
+         workspaceId: 'clinic-demo',
+         firstName,
+         lastName,
+         dni: rawDni || String(Math.floor(10000000 + Math.random() * 80000000)),
+         phone: cleanPhone,
+         email: row.email || '',
+         coverage,
+         status: 'ACTIVE',
+         notes: row.notes || 'Importado vía padrón CSV / Excel',
+         createdAt: now(),
+         updatedAt: now()
+       };
+       state.patients.unshift(newP);
+       imported++;
+     }
+   }
+   audit('MIGRATION_PATIENTS_IMPORTED', 'migration', uid(), `Importación masiva: ${imported} nuevos pacientes, ${updated} actualizados.`);
+   persist();
+   return clone({ ok: true, imported, updated, total: rows.length });
+  }
+  if(path==='/api/medical-orders'&&method==='POST'){
+   needPatient(b.patientId);
+   const mo = {
+     id: uid(),
+     workspaceId: 'clinic-demo',
+     patientId: b.patientId,
+     doctorId: b.doctorId || 'doc-1',
+     doctorName: (state.doctors && state.doctors.find(d => d.id === b.doctorId)?.name) || 'Dra. Julia Morales',
+     instructions: text(b.instructions, 'Indicaciones', 1, 2000),
+     items: Array.isArray(b.items) ? b.items : [],
+     therapyType: b.therapyType || 'SUEROTERAPIA',
+     resource: b.resource || 'Sillón 1',
+     sessionNumber: Number(b.sessionNumber) || 1,
+     totalSessions: Number(b.totalSessions) || 1,
+     status: 'PENDING',
+     notes: b.notes || '',
+     createdAt: now(),
+     updatedAt: now()
+   };
+   if (!state.medicalOrders) state.medicalOrders = [];
+   state.medicalOrders.unshift(mo);
+   audit('MEDICAL_ORDER_CREATED', 'medical_order', mo.id, `Indicación registrada para ${mo.resource}.`);
+   persist();
+   return clone(mo);
+  }
+  if(path.startsWith('/api/medical-orders/') && path.endsWith('/checkin') && method==='POST'){
+   const id = path.slice('/api/medical-orders/'.length, -'/checkin'.length);
+   const mo = (state.medicalOrders || []).find(o => o.id === id);
+   if (!mo) fail('Indicación no encontrada', 404);
+   mo.status = 'IN_PROGRESS';
+   mo.arrivedAt = now();
+   mo.updatedAt = now();
+   audit('PATIENT_ARRIVED', 'medical_order', mo.id, 'Paciente en sala de infusión.');
+   persist();
+   return clone(mo);
+  }
+  if(path.startsWith('/api/medical-orders/') && path.endsWith('/administer') && method==='POST'){
+   const id = path.slice('/api/medical-orders/'.length, -'/administer'.length);
+   const mo = (state.medicalOrders || []).find(o => o.id === id);
+   if (!mo) fail('Indicación no encontrada', 404);
+   mo.status = 'ADMINISTERED';
+   mo.administeredAt = now();
+   mo.administeredBy = session.user.name;
+   mo.vitals = b.vitals || {};
+   mo.hrvTable = b.hrvTable || [];
+   mo.updatedAt = now();
+   if (Array.isArray(mo.items) && state.inventory) {
+     for (const it of mo.items) {
+       const inv = state.inventory.find(x => x.name.toLowerCase() === (it.name || '').toLowerCase() || x.sku === it.sku);
+       if (inv) inv.quantity = Math.max(0, inv.quantity - (Number(it.quantity) || 1));
+     }
+   }
+   audit('MEDICAL_ORDER_ADMINISTERED', 'medical_order', mo.id, `Sesión completada y stock descontado.`);
+   persist();
+   return clone(mo);
+  }
+  if(path.startsWith('/api/admin/integrations/') && method==='POST'){
+   const id = path.split('/').pop();
+   const it = (state.integrations || []).find(x => x.id === id);
+   if (!it) fail('Integración no encontrada', 404);
+   it.status = b.status || 'CONNECTED';
+   it.config = b.config || b;
+   it.updatedAt = now();
+   audit('INTEGRATION_CONFIGURED', 'integration', id, `Configuración de ${it.name}`);
+   persist();
+   return clone(it);
+  }
  if(path==='/api/settings'&&method==='PATCH'){for(const k of ['pauseAssistant','pauseWebhooks','pauseBilling'])if(typeof b[k]==='boolean')state.settings[k]=b[k];audit('SETTINGS_UPDATED','settings','clinic-demo');persist();return clone(state.settings);}
  if(path==='/api/copilot'&&method==='POST'){
   if(state.settings.pauseAssistant)fail('El asistente está pausado desde Configuración.',409,'PAUSED');

@@ -101,7 +101,7 @@
 .agenda-pill.active{background:#1b4c37;color:#fff;border-color:#1b4c37}
 .agenda-pill .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
 
-/* --- HISTORIAL MÉDICO ESTILO OMNIASALUD --- */
+/* --- HISTORIAL MÉDICO INTEGRAL --- */
 .omni-top-tabs{display:flex;gap:4px;border-bottom:2px solid #e1e9dc;margin-bottom:16px;overflow-x:auto;padding-bottom:1px}
 .omni-tab-btn{padding:9px 16px;font-size:12.5px;font-weight:600;color:#557060;background:none;border:none;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap;transition:all .15s ease}
 .omni-tab-btn:hover{color:#1b4c37;background:#f4f8f3;border-radius:6px 6px 0 0}
@@ -112,9 +112,9 @@
 
 .omni-sidebar{background:#fbfdfa;border:1px solid #e4ece0;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:14px}
 .omni-sidebar-title{font-size:11px;font-weight:750;text-transform:uppercase;color:#496b58;letter-spacing:0.5px;margin-bottom:6px}
-.omni-filter-chip{display:block;padding:5px 8px;border-radius:6px;font-size:11.5px;color:#355342;cursor:pointer;margin-bottom:3px;transition:background .15s ease}
-.omni-filter-chip:hover{background:#eef6ec}
-.omni-filter-chip.active{background:#2a6845;color:#fff;font-weight:600}
+.omni-filter-chip, .hcd-filter-chip{display:block;padding:5px 8px;border-radius:6px;font-size:11.5px;color:#355342;cursor:pointer;margin-bottom:3px;transition:background .15s ease}
+.omni-filter-chip:hover, .hcd-filter-chip:hover{background:#eef6ec}
+.omni-filter-chip.active, .hcd-filter-chip.active{background:#2a6845;color:#fff;font-weight:600}
 
 .omni-entry-card{border:1px solid #e4ece0;border-radius:10px;padding:16px 20px;background:#ffffff;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,0.02)}
 .omni-entry-date{font-size:12px;font-weight:700;color:#e67e22;margin-bottom:4px}
@@ -418,7 +418,7 @@
 }
 
 /* ==========================================================================
-   HISTORIA CLÍNICA - SIDEBAR DE FILTROS PULIDO (Omniasalud Style)
+   HISTORIA CLÍNICA - SIDEBAR DE FILTROS PULIDO
    ========================================================================== */
 .omni-sidebar {
   background: #ffffff !important;
@@ -467,14 +467,14 @@
   color: #1e293b !important;
   box-sizing: border-box !important;
 }
-.omni-filter-group {
+.omni-filter-group, .hcd-filter-group {
   display: flex;
   flex-direction: column;
   gap: 4px;
   width: 100%;
   box-sizing: border-box;
 }
-.omni-filter-title {
+.omni-filter-title, .hcd-filter-title {
   font-size: 11px;
   font-weight: 750;
   text-transform: uppercase;
@@ -483,7 +483,7 @@
   margin-bottom: 6px;
   display: block;
 }
-.omni-filter-chip {
+.omni-filter-chip, .hcd-filter-chip {
   display: flex;
   align-items: center;
   width: 100%;
@@ -500,12 +500,12 @@
   box-sizing: border-box;
   margin-bottom: 3px;
 }
-.omni-filter-chip:hover {
+.omni-filter-chip:hover, .hcd-filter-chip:hover {
   background: #f1f5f9;
   border-color: #cbd5e1;
   color: #0f172a;
 }
-.omni-filter-chip.active {
+.omni-filter-chip.active, .hcd-filter-chip.active {
   background: #1b4c37 !important;
   border-color: #1b4c37 !important;
   color: #ffffff !important;

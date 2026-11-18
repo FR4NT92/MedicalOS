@@ -220,7 +220,7 @@ const S = {
   omniToDate: '',
   omniProblem: '',
   omniSpecialty: '',
-  omniAttachmentFilter: 'ALL',
+  recordAttachmentFilter: 'ALL',
   mobile: false,
   chat: [],
   recordTab: 'notes',
@@ -2181,7 +2181,7 @@ function patientsView() {
   const search = S.patientSearch.toLowerCase();
   const p = S.data.patients.filter(p => (!S.patientStatus || p.status === S.patientStatus) && [nameOf(p), p.dni, p.phone, p.email].some(x => x.toLowerCase().includes(search)));
   return heading('Directorio de Pacientes', 'Fichas integrales de pacientes, historial de atenciones y datos de cobertura.',
-    btn('Importar Omniasalud / CSV', 'open-omnia-importer', 'upload') + btn('Exportar CSV', 'export-patients', 'download') + btn('Nuevo paciente', 'new-patient', 'plus', 'primary')
+    btn('Importar Pacientes (CSV / Excel)', 'open-patient-importer', 'upload') + btn('Exportar CSV', 'export-patients', 'download') + btn('Nuevo paciente', 'new-patient', 'plus', 'primary')
   ) +
   `<section class="panel">
     <div class="toolbar">
@@ -2481,86 +2481,7 @@ function scheduleView() {
   </div>`;
 }
 
-function kardexSection() {
-  const orders = S.data.medicalOrders || [];
-  const pending = orders.filter(o => o.status === 'PENDING');
-  const administered = orders.filter(o => o.status === 'ADMINISTERED');
 
-  return `<div class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr))">
-    ${stat('Indicaciones Totales', orders.length, 'activity', 'Historial de órdenes médicas')}
-    ${stat('Pendientes de Suministrar', pending.length, 'clock', `${pending.length} órdenes en sala`, pending.length > 0)}
-    ${stat('Administradas con Éxito', administered.length, 'checkcircle', 'Stock descontado automáticamente')}
-  </div>
-  <section class="panel">
-    <div class="panel-header">
-      <div>
-        <h2>Kardex de Enfermería y Administración de Insumos</h2>
-        <p class="panel-sub">Registro clínico de administración en tiempo real con descuento automático de inventario.</p>
-      </div>
-      <button class="btn primary small" data-action="new-medical-order">${icon('plus', 13)} Nueva Indicación</button>
-    </div>
-    <div class="panel-body">
-      ${orders.length ? `
-        <div style="display:flex;flex-direction:column;gap:12px">
-          ${orders.map(o => {
-            const pat = patientBy(o.patientId);
-            const isPending = o.status === 'PENDING';
-            const items = o.items || [];
-            return `
-            <div class="soap-item" style="border-left:4px solid ${isPending ? '#e69b00' : '#2b6e4e'};padding:14px;background:#fff;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
-              <div class="between" style="align-items:flex-start">
-                <div>
-                  <div class="flex" style="gap:8px;align-items:center">
-                    <strong style="font-size:14px;color:#1e4c3a">${esc(nameOf(pat))}</strong>
-                    <span class="tiny muted">DNI ${esc(pat?.dni || '—')}</span>
-                    <span class="badge ${isPending ? 'amber' : 'green'}">${isPending ? 'Pendiente' : 'Administrado'}</span>
-                  </div>
-                  <div class="tiny muted" style="margin-top:2px">
-                    Prescrito por <b>${esc(o.doctorName)}</b> · ${fmtDate(o.createdAt, true)} a las ${fmtTime(o.createdAt)} hs
-                  </div>
-                </div>
-                ${isPending ? `
-                  <div class="flex" style="gap:6px">
-                    <button class="btn small primary" data-action="administer-order" data-id="${o.id}">
-                      ${icon('checkcircle', 13)} Confirmar Administración
-                    </button>
-                    <button class="btn small ghost text-link" data-action="cancel-order" data-id="${o.id}">
-                      Cancelar
-                    </button>
-                  </div>
-                ` : `
-                  <div style="text-align:right">
-                    <span class="badge green">${icon('checkcircle', 11)} Suministrado</span>
-                    <div class="tiny muted" style="margin-top:3px">Por ${esc(o.administeredBy || 'Enfermería')} · ${fmtDate(o.administeredAt, true)}</div>
-                  </div>
-                `}
-              </div>
-
-              <div style="margin:10px 0;padding:8px 12px;background:#f8fafc;border-radius:4px;font-size:13px;line-height:1.5">
-                <b>Indicación:</b> ${esc(o.instructions)}
-                ${o.notes ? `<div class="tiny muted" style="margin-top:4px"><b>Observaciones:</b> ${esc(o.notes)}</div>` : ''}
-              </div>
-
-              ${items.length ? `
-                <div style="margin-top:8px">
-                  <span class="tiny muted" style="display:block;margin-bottom:4px">Insumos y Medicación Requerida:</span>
-                  <div class="flex" style="flex-wrap:wrap;gap:6px">
-                    ${items.map(it => `
-                      <span class="attachment-chip" style="cursor:default">
-                        ${icon('box', 12)}
-                        <b>${esc(it.name)}</b> x ${it.quantity} ${esc(it.unit || 'uds')} <small style="color:#64748b">(${esc(it.route || 'EV')})</small>
-                      </span>
-                    `).join('')}
-                  </div>
-                </div>
-              ` : ''}
-            </div>`;
-          }).join('')}
-        </div>
-      ` : empty('Sin órdenes de enfermería', 'No hay indicaciones médicas pendientes ni registradas en esta clínica.', btn('Crear primera indicación', 'new-medical-order', 'plus', 'primary'))}
-    </div>
-  </section>`;
-}
 
 function staffView() {
   const staff = S.data.staff || [];
@@ -2581,18 +2502,10 @@ function staffView() {
   const adminCount = staff.filter(s => s.role === 'CLINIC_ADMIN').length;
   const nurseCount = staff.filter(s => s.role === 'NURSE').length;
 
-  return heading('Equipo, Enfermería y Controles de Acceso', 'Gestión de personal de secretaría, equipo médico, enfermería y permisos de acceso.',
-    `<div class="flex" style="gap:8px">
-      <button class="btn small" data-action="new-medical-order">${icon('activity', 13)} Nueva Indicación</button>
-      <button class="btn small primary" data-action="new-staff">${icon('plus', 13)} Nuevo Miembro</button>
-    </div>`
+  return heading('Equipo y Controles de Acceso', 'Gestión de personal de secretaría, equipo médico, enfermería y permisos de acceso al sistema.',
+    btn('Nuevo Miembro', 'new-staff', 'plus', 'primary')
   ) +
-  `<div class="financial-tabs" style="margin-bottom:14px">
-    <button class="btn small ${currentTab === 'members' ? 'primary' : ''}" data-action="staff-tab" data-value="members">Equipo y Permisos (${staff.length})</button>
-    <button class="btn small ${currentTab === 'kardex' ? 'primary' : ''}" data-action="staff-tab" data-value="kardex">Kardex / Indicaciones a Enfermería (${pendingOrders} pendientes)</button>
-  </div>` +
-  (currentTab === 'kardex' ? kardexSection() : `
-  <div class="staff-stats">
+  `<div class="staff-stats">
     <div class="stat-card">
       <div class="stat-top"><span>Total Equipo</span><div class="stat-icon">${icon('users', 16)}</div></div>
       <div class="stat-number">${totalMembers}</div>
@@ -2679,7 +2592,7 @@ function staffView() {
       <span>Personal activo en clínica: ${filtered.length}</span>
       <span>Controles de acceso basados en roles (RBAC) con auditoría</span>
     </div>
-  </section>`);
+  </section>`;
 }
 
 function staffForm() {
@@ -3032,16 +2945,16 @@ function recordsView() {
     if (S.omniSpecialty && r.specialty !== S.omniSpecialty) return false;
 
     // Author filter
-    if (S.omniAuthor && r.author !== S.omniAuthor) return false;
+    if (S.recordAuthor && r.author !== S.recordAuthor) return false;
 
     // Attachment filter
-    if (S.omniAttachmentFilter === 'with' && (!r.attachments || r.attachments.length === 0)) return false;
-    if (S.omniAttachmentFilter === 'without' && r.attachments && r.attachments.length > 0) return false;
+    if (S.recordAttachmentFilter === 'with' && (!r.attachments || r.attachments.length === 0)) return false;
+    if (S.recordAttachmentFilter === 'without' && r.attachments && r.attachments.length > 0) return false;
 
     return true;
   });
 
-  return heading('Historia Clínica Integral', 'Evoluciones médicas, estudios complementarios, laboratorio y consentimientos inmutables estilo Omniasalud.',
+  return heading('Historia Clínica Integral', 'Evoluciones médicas, estudios complementarios, laboratorio y consentimientos informados inmutables.',
     `<div class="flex" style="gap:8px">
       <button class="btn small primary" data-action="new-record">${icon('plus', 13)} Nueva Evolución</button>
       <button class="btn small" data-action="new-attachment">${icon('file', 13)} Cargar Estudio / Lab</button>
@@ -3059,7 +2972,7 @@ function recordsView() {
 
     <div>
       ${p ? `
-        <!-- Omniasalud Top Navigation Bar -->
+        <!-- Records Top Navigation Bar -->
         <nav class="omni-top-tabs">
           <button class="omni-tab-btn ${omniTab === 'estudios' ? 'active' : ''}" data-action="omni-tab" data-value="estudios">Estudios e Imágenes</button>
           <button class="omni-tab-btn ${omniTab === 'evoluciones' ? 'active' : ''}" data-action="omni-tab" data-value="evoluciones">Evoluciones</button>
@@ -3091,7 +3004,7 @@ function recordsView() {
           </div>
         </section>
 
-        <!-- Omniasalud Split Container: Filter Sidebar + Timeline Feed -->
+        <!-- Split Container: Filter Sidebar + Timeline Feed -->
         <div class="omni-container">
           <!-- Left Filter Sidebar -->
           <aside class="omni-sidebar">
@@ -3147,22 +3060,22 @@ function recordsView() {
             ` : ''}
 
             ${authors.length ? `
-              <div class="omni-filter-group">
-                <span class="omni-filter-title">Autor</span>
+              <div class="hcd-filter-group">
+                <span class="hcd-filter-title">Autor</span>
                 ${authors.map(aut => `
-                  <button class="omni-filter-chip ${S.omniAuthor === aut ? 'active' : ''}" data-action="omni-filter-chip" data-filter="author" data-value="${esc(aut)}">
+                  <button class="hcd-filter-chip ${S.recordAuthor === aut ? 'active' : ''}" data-action="hcd-filter-chip" data-filter="author" data-value="${esc(aut)}">
                     ${esc(aut)}
                   </button>
                 `).join('')}
-                ${S.omniAuthor ? `<button class="text-link tiny" style="margin-top:4px" data-action="omni-filter-chip" data-filter="author" data-value="">(Limpiar autor)</button>` : ''}
+                ${S.recordAuthor ? `<button class="text-link tiny" style="margin-top:4px" data-action="hcd-filter-chip" data-filter="author" data-value="">(Limpiar autor)</button>` : ''}
               </div>
             ` : ''}
 
-            <div class="omni-filter-group">
-              <span class="omni-filter-title">Archivos</span>
-              <button class="omni-filter-chip ${!S.omniAttachmentFilter ? 'active' : ''}" data-action="omni-filter-chip" data-filter="attachment" data-value="">Todos</button>
-              <button class="omni-filter-chip ${S.omniAttachmentFilter === 'with' ? 'active' : ''}" data-action="omni-filter-chip" data-filter="attachment" data-value="with">Con adjunto</button>
-              <button class="omni-filter-chip ${S.omniAttachmentFilter === 'without' ? 'active' : ''}" data-action="omni-filter-chip" data-filter="attachment" data-value="without">Sin adjunto</button>
+            <div class="hcd-filter-group">
+              <span class="hcd-filter-title">Archivos</span>
+              <button class="hcd-filter-chip ${!S.recordAttachmentFilter ? 'active' : ''}" data-action="hcd-filter-chip" data-filter="attachment" data-value="">Todos</button>
+              <button class="hcd-filter-chip ${S.recordAttachmentFilter === 'with' ? 'active' : ''}" data-action="hcd-filter-chip" data-filter="attachment" data-value="with">Con adjunto</button>
+              <button class="hcd-filter-chip ${S.recordAttachmentFilter === 'without' ? 'active' : ''}" data-action="hcd-filter-chip" data-filter="attachment" data-value="without">Sin adjunto</button>
             </div>
           </aside>
 
@@ -3329,6 +3242,8 @@ function billingView() {
     totalQuotes = quotes.reduce((s, q) => s + (q.totalCents || 0) / 100, 0);
 
   const currentTab = S.billingTab || 'payments';
+  const arcaInteg = (S.data?.integrations || []).find(i => i.id === 'arca');
+  const arcaConnected = Boolean(arcaInteg && arcaInteg.status === 'CONNECTED');
 
   return heading('Cobros, Facturación y Presupuestos', 'Control administrativo de pagos recibidos, emisión oficial ARCA y gestión de presupuestos médicos.',
     btn('Nuevo Presupuesto', 'new-quote', 'plus') + btn('Emitir Factura ARCA', 'new-invoice', 'file') + btn('Registrar cobro', 'new-payment', 'plus', 'primary')
@@ -3386,6 +3301,15 @@ function billingView() {
         </tbody>
       </table></div>` : empty('Sin registros', 'No hay cobros registrados en este período.')}
     ` : `
+      ${!arcaConnected ? `
+        <div style="background:#fffbeb;border:1px solid #fde68a;padding:12px 16px;border-radius:8px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px">
+          <div>
+            <strong style="color:#92400e;display:flex;align-items:center;gap:6px">${icon('alert', 16, '#b45309')} Canal fiscal ARCA (ex AFIP) desconectado</strong>
+            <div class="tiny" style="color:#b45309;margin-top:2px">Para emitir facturas fiscales oficiales con CAE y código QR normativo, debes configurar y activar las credenciales de ARCA en Integraciones.</div>
+          </div>
+          <button class="btn small" data-action="config-integration" data-id="arca" style="white-space:nowrap;font-weight:600">Configurar ARCA</button>
+        </div>
+      ` : ''}
       ${S.data.invoices.length ? `<div class="table-wrap"><table>
         <thead><tr><th>Fecha</th><th>Comprobante</th><th>Paciente</th><th>Concepto</th><th>Importe</th><th>Estado / ARCA</th><th style="text-align:right">Acciones</th></tr></thead>
         <tbody>
@@ -3413,7 +3337,7 @@ function billingView() {
             </tr>`;
           }).join('')}
         </tbody>
-      </table></div>` : empty('Sin registros', 'No hay facturas emitidas en este período.')}
+      </table></div>` : (!arcaConnected ? empty('Canal fiscal ARCA no conectado', 'No hay facturas emitidas. Las facturas fiscales electrónicas oficiales requieren conectar tu CUIT y Punto de Venta en Integraciones.', btn('Configurar ARCA', 'config-integration', 'settings', 'primary', 'data-id="arca"')) : empty('Sin registros', 'No hay facturas emitidas en este período.', btn('Emitir Factura ARCA', 'new-invoice', 'file', 'primary')))}
     `}
     <div class="panel-footer">
       <span>Moneda: ARS (Pesos Argentinos) · Módulo Financiero y Presupuestario Integral</span>
@@ -3725,7 +3649,7 @@ function consentDialog(patientId) {
 
   const initial = templates.SURGERY;
   formDialog('consent', 'Nuevo Consentimiento Informado Bilateral', `Paciente: ${nameOf(p)} · Ley 26.529`,
-    selectField('Plantilla Normativa (Omniasalud / Ley 26.529)', 'type', [
+    selectField('Plantilla Normativa (Ley 26.529 de Derechos del Paciente)', 'type', [
       ['SURGERY', 'Cirugía Menor Ambulatoria / Procedimiento Quirúrgico'],
       ['ANESTHESIA', 'Actos de Anestesia Local y Sedación'],
       ['AESTHETIC', 'Tratamiento de Medicina Estética / Láser / Invasivo'],
@@ -5105,9 +5029,9 @@ function administerHospitalDayDialog(orderId) {
   }, 50);
 }
 
-function omniaImportDialog() {
-  formDialog('omnia-importer', 'Importación Masiva de Pacientes (Omniasalud / CSV)',
-    'Transfiere el padrón de pacientes, coberturas, datos de contacto y antecedentes clínicos desde Omniasalud u otros softwares.',
+function patientImportDialog() {
+  formDialog('patient-importer', 'Importación Masiva de Pacientes (CSV / Excel)',
+    'Transfiere o actualiza el padrón de pacientes, coberturas médicas, datos de contacto y antecedentes clínicos desde archivos CSV o planillas Excel tabuladas.',
     `<div class="form-field full">
       <div class="info-box">
         ${icon('upload', 18)}
@@ -5118,21 +5042,21 @@ function omniaImportDialog() {
       </div>
     </div>
     <div class="form-field full">
-      <label>1. Cargar archivo CSV / Excel (.csv, .txt):</label>
-      <input type="file" id="omnia-file-input" accept=".csv,.txt" class="input">
+      <label>1. Cargar archivo CSV / Excel (.csv, .tsv, .txt):</label>
+      <input type="file" id="patient-file-input" accept=".csv,.tsv,.txt" class="input">
     </div>
     <div class="form-field full">
-      <label>2. O pega directamente los datos aquí:</label>
-      <textarea id="omnia-csv-text" name="csvText" class="input" style="height:140px;font-family:monospace;font-size:12px" placeholder="DNI;Nombre;Apellido;FechaNacimiento;ObraSocial;NroAfiliado;Telefono;Email;Alergias;Patologias
+      <label>2. O pega directamente los datos tabulados / CSV aquí:</label>
+      <textarea id="patient-csv-text" name="csvText" class="input" style="height:140px;font-family:monospace;font-size:12px" placeholder="DNI;Nombre;Apellido;FechaNacimiento;ObraSocial;NroAfiliado;Telefono;Email;Alergias;Patologias
 35123456;Juan;Perez;1988-04-15;OSDE;012345678;+5491144556677;juan@gmail.com;Penicilina;Hipotiroidismo
 40987654;Maria;Gomez;1996-09-22;Swiss Medical;98765432;+5491188990011;maria@gmail.com;Ninguna;Asma"></textarea>
     </div>`,
-    'Comenzar Importación a Medical OS', '', 'wide'
+    'Comenzar Importación de Pacientes', '', 'wide'
   );
 
   setTimeout(() => {
-    const fileInput = $('#omnia-file-input');
-    const textArea = $('#omnia-csv-text');
+    const fileInput = $('#patient-file-input');
+    const textArea = $('#patient-csv-text');
     if (fileInput) {
       fileInput.addEventListener('change', e => {
         const file = e.target.files[0];
@@ -5145,8 +5069,10 @@ function omniaImportDialog() {
         }
       });
     }
-  }, 50);
+  }, 100);
 }
+const omniaImportDialog = patientImportDialog;
+const omniaImporterDialog = patientImportDialog;
 
 function paymentForm(patientId) {
   const id = makeId();
@@ -5160,6 +5086,28 @@ function paymentForm(patientId) {
 }
 
 function invoiceForm() {
+  const arca = (S.data?.integrations || []).find(i => i.id === 'arca');
+  if (!arca || arca.status !== 'CONNECTED') {
+    showModal('Conexión con ARCA Requerida', `
+      <div style="padding:10px 0">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;background:#fef2f2;border:1px solid #fee2e2;padding:14px;border-radius:8px">
+          ${icon('alert', 24, '#b91c1c')}
+          <div>
+            <h4 style="margin:0 0 4px 0;color:#991b1b;font-size:15px">Canal Fiscal ARCA (ex AFIP) Desconectado</h4>
+            <p style="margin:0;font-size:13px;color:#7f1d1d">Para evitar comprobantes simulados o inválidos, el sistema requiere una conexión real activa con ARCA.</p>
+          </div>
+        </div>
+        <p style="font-size:13px;color:#374151;line-height:1.5;margin-bottom:16px">
+          Para emitir comprobantes fiscales electrónicos oficiales con CAE y código QR normativo (RG 4291/4597), la clínica debe vincular su <b>CUIT emisor</b>, <b>Punto de Venta</b> y <b>Certificado Digital</b> en el módulo de Integraciones.
+        </p>
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn" data-action="close-modal">Cerrar</button>
+          <button class="btn primary" data-action="config-integration" data-id="arca">${icon('settings', 14)} Configurar ARCA en Integraciones</button>
+        </div>
+      </div>
+    `);
+    return;
+  }
   formDialog('invoice', 'Emitir Factura Electrónica ARCA', 'Emisión oficial con obtención de CAE reglamentario y código QR fiscal (RG 4291/4597).',
     selectField('Tipo de Factura Oficial *', 'invoiceType', [
       ['B', 'Factura B (Consumidor Final / Obras Sociales y Prepagas)'],
@@ -5537,13 +5485,14 @@ document.addEventListener('click', async e => {
       case 'open-patient-records': S.selectedPatient = id; closeModal(); await navigate('records'); break;
       case 'record-tab': S.recordTab = el.dataset.value; contentOnly(); break;
       case 'omni-tab': S.omniTab = el.dataset.value; contentOnly(); break;
+      case 'hcd-filter-chip':
       case 'omni-filter-chip': {
         const filterType = el.dataset.filter;
         const val = el.dataset.value;
         if (filterType === 'problem') S.omniProblem = (S.omniProblem === val ? '' : val);
         if (filterType === 'specialty') S.omniSpecialty = (S.omniSpecialty === val ? '' : val);
-        if (filterType === 'author') S.omniAuthor = (S.omniAuthor === val ? '' : val);
-        if (filterType === 'attachment') S.omniAttachmentFilter = val;
+        if (filterType === 'author') S.recordAuthor = (S.recordAuthor === val ? '' : val);
+        if (filterType === 'attachment') S.recordAttachmentFilter = val;
         contentOnly();
         break;
       }
@@ -5597,8 +5546,9 @@ document.addEventListener('click', async e => {
         toast('Presupuesto marcado como Aprobado.');
         break;
       }
+      case 'open-patient-importer':
       case 'open-omnia-importer':
-        omniaImporterDialog();
+        patientImportDialog();
         break;
       case 'new-medical-order':
         medicalOrderDialog(el.dataset.patientId || S.selectedPatient);
@@ -5999,11 +5949,12 @@ document.addEventListener('submit', async e => {
           items: orderItems,
           notes: b.notes || ''
         });
-        S.staffTab = 'kardex';
-        S.view = 'staff';
-        message = 'Indicación médica para enfermería registrada con éxito.';
+        S.hospitalDayFilter = 'ALL';
+        S.view = 'hospitalDay';
+        message = 'Indicación médica para enfermería registrada con éxito. Visible en Hospital de Día y en la Historia Clínica del paciente.';
         break;
       }
+      case 'patient-importer':
       case 'omnia-importer': {
         const raw = b.csvText || '';
         if (!raw.trim()) throw new Error('Por favor ingresa o carga datos en formato CSV.');
@@ -6027,7 +5978,7 @@ document.addEventListener('submit', async e => {
         
         toast(`Importando ${parsedRows.length} pacientes...`);
         const res = await api('/api/migration/import', 'POST', { rows: parsedRows });
-        message = `Importación Omniasalud finalizada: ${res.imported} nuevos pacientes dados de alta, ${res.updated} actualizados.`;
+        message = `Importación de pacientes finalizada: ${res.imported} nuevos pacientes dados de alta, ${res.updated} actualizados en el padrón.`;
         S.view = 'patients';
         break;
       }
@@ -6099,12 +6050,17 @@ document.addEventListener('submit', async e => {
         S.billingTab = 'payments';
         message = 'Cobro registrado correctamente.';
         break;
-      case 'invoice':
+      case 'invoice': {
+        const arca = (S.data?.integrations || []).find(i => i.id === 'arca');
+        if (!arca || arca.status !== 'CONNECTED') {
+          throw new Error('La integración oficial con ARCA (ex AFIP) no está conectada. Configura tus credenciales y certificado fiscal en Integraciones antes de emitir comprobantes.');
+        }
         await api('/api/invoices', 'POST', { ...b, amount: Number(b.amount) });
         S.view = 'billing';
         S.billingTab = 'invoices';
         message = 'Factura oficial autorizada por ARCA con CAE emitida exitosamente.';
         break;
+      }
       case 'inventory':
         if (form.dataset.id) {
           await api('/api/inventory/' + form.dataset.id, 'PATCH', b);

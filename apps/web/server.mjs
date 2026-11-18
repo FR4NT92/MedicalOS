@@ -1278,6 +1278,26 @@ async function handle(req, res) {
       const b = await body(req);
       const configObj = b.config || b;
       const status = b.status || 'CONNECTED';
+      if (status === 'CONNECTED') {
+        if (integrationId === 'arca' && (!configObj.cuit || !configObj.puntoVenta)) {
+          fail(400, 'Para conectar ARCA debes ingresar el CUIT emisor y Punto de Venta.', 'CONFIG_INCOMPLETE');
+        }
+        if (integrationId === 'highlevel' && (!configObj.locationId || !configObj.apiKey)) {
+          fail(400, 'Para conectar GoHighLevel debes ingresar Location ID y API Key.', 'CONFIG_INCOMPLETE');
+        }
+        if (integrationId === 'whatsapp' && (!configObj.phoneNumberId || !configObj.token)) {
+          fail(400, 'Para conectar WhatsApp Business API debes ingresar Phone Number ID y Token.', 'CONFIG_INCOMPLETE');
+        }
+        if (integrationId === 'mercadopago' && !configObj.accessToken) {
+          fail(400, 'Para conectar Mercado Pago debes ingresar el Access Token.', 'CONFIG_INCOMPLETE');
+        }
+        if (integrationId === 'google' && (!configObj.clientId || !configObj.calendarId)) {
+          fail(400, 'Para conectar Google Calendar debes ingresar Client ID y Calendar ID.', 'CONFIG_INCOMPLETE');
+        }
+        if (integrationId === 'ai' && !configObj.apiKey) {
+          fail(400, 'Para conectar el Proveedor de IA debes ingresar la API Key.', 'CONFIG_INCOMPLETE');
+        }
+      }
       const configStr = JSON.stringify(configObj);
       transaction(() => {
         run('UPDATE integrations SET status=?, config=?, updatedAt=? WHERE id=?', status, configStr, now(), integrationId);
@@ -1306,19 +1326,30 @@ async function handle(req, res) {
       const id = integTestMatch[1];
       const item = q('SELECT * FROM integrations WHERE id=?', id);
       if (!item) fail(404, 'Integración no encontrada');
+      if (item.status !== 'CONNECTED') {
+        fail(400, `${item.name} no está conectada. Configura y activa las credenciales primero.`, 'INTEGRATION_NOT_CONNECTED');
+      }
       const cfg = JSON.parse(item.config || '{}');
 
-      let pingResult = { ok: true, latencyMs: 45, message: 'Conexión verificada exitosamente.' };
+      let pingResult = { ok: true, latencyMs: 45, message: 'Credenciales validadas y conexión activa.' };
       if (id === 'highlevel') {
-        pingResult.details = { locationId: cfg.locationId || 'Activo', endpoint: 'https://services.leadconnectorhq.com' };
+        if (!cfg.locationId || !cfg.apiKey) fail(400, 'Faltan Location ID y API Key de GoHighLevel.', 'CONFIG_INCOMPLETE');
+        pingResult.details = { locationId: cfg.locationId, endpoint: 'https://services.leadconnectorhq.com' };
       } else if (id === 'whatsapp') {
-        pingResult.details = { phoneNumberId: cfg.phoneNumberId || 'Activo', apiVersion: 'v21.0' };
+        if (!cfg.phoneNumberId || !cfg.token) fail(400, 'Faltan Phone Number ID y Token de WhatsApp Business API.', 'CONFIG_INCOMPLETE');
+        pingResult.details = { phoneNumberId: cfg.phoneNumberId, apiVersion: 'v21.0' };
       } else if (id === 'mercadopago') {
+        if (!cfg.accessToken) fail(400, 'Falta Access Token de Mercado Pago.', 'CONFIG_INCOMPLETE');
         pingResult.details = { mode: cfg.sandbox === 'true' ? 'Sandbox' : 'Producción', gateway: 'api.mercadopago.com' };
       } else if (id === 'arca') {
-        pingResult.details = { cuit: cfg.cuit || '30-71829384-9', wsfeServer: 'wswhomo.afip.gov.ar/wsfev1' };
+        if (!cfg.cuit || !cfg.puntoVenta) fail(400, 'Faltan CUIT emisor y Punto de Venta de ARCA.', 'CONFIG_INCOMPLETE');
+        pingResult.details = { cuit: cfg.cuit, puntoVenta: cfg.puntoVenta, wsfeServer: cfg.ambiente === 'produccion' ? 'servicios1.afip.gov.ar/wsfev1' : 'wswhomo.afip.gov.ar/wsfev1' };
       } else if (id === 'ai') {
+        if (!cfg.apiKey) fail(400, 'Falta API Key del proveedor de IA.', 'CONFIG_INCOMPLETE');
         pingResult.details = { provider: cfg.provider || 'openai', model: cfg.model || 'gpt-4o' };
+      } else if (id === 'google') {
+        if (!cfg.clientId || !cfg.calendarId) fail(400, 'Faltan Client ID y Calendar ID de Google Calendar.', 'CONFIG_INCOMPLETE');
+        pingResult.details = { calendarId: cfg.calendarId, sync: 'Active' };
       }
 
       return json(res, 200, pingResult);
@@ -1522,7 +1553,10 @@ async function handle(req, res) {
       if (!a) fail(404, 'Turno no encontrado');
       const p = patient(w, a.patientId);
       const doc = q('SELECT * FROM doctors WHERE id=?', a.doctorId);
-      const waConfigRow = q('SELECT config FROM integrations WHERE id=?', 'whatsapp');
+      const waConfigRow = q('SELECT status, config FROM integrations WHERE id=?', 'whatsapp');
+      if (!waConfigRow || waConfigRow.status !== 'CONNECTED') {
+        fail(400, 'La integración con WhatsApp Business API no está conectada. Configura tus credenciales en Integraciones para activar recordatorios automáticos.', 'INTEGRATION_NOT_CONNECTED');
+      }
       const waConfig = JSON.parse(waConfigRow?.config || '{}');
 
       const waResult = await WhatsAppService.sendAppointmentReminder(waConfig, {
@@ -1540,7 +1574,10 @@ async function handle(req, res) {
     // Generar link de pago online de Mercado Pago
     if (path === '/api/payments/mercadopago/preference' && method === 'POST') {
       const b = await body(req);
-      const mpConfigRow = q('SELECT config FROM integrations WHERE id=?', 'mercadopago');
+      const mpConfigRow = q('SELECT status, config FROM integrations WHERE id=?', 'mercadopago');
+      if (!mpConfigRow || mpConfigRow.status !== 'CONNECTED') {
+        fail(400, 'La pasarela de Mercado Pago no está conectada. Configura tus credenciales y Access Token en Integraciones antes de generar links de cobro.', 'INTEGRATION_NOT_CONNECTED');
+      }
       const mpConfig = JSON.parse(mpConfigRow?.config || '{}');
 
       const pref = await MercadoPagoService.createPreference(mpConfig, {
@@ -1561,8 +1598,14 @@ async function handle(req, res) {
       const inv = q('SELECT * FROM invoices WHERE workspaceId=? AND id=?', w, invId);
       if (!inv) fail(404, 'Comprobante no encontrado');
       const p = patient(w, inv.patientId);
-      const arcaConfigRow = q('SELECT config FROM integrations WHERE id=?', 'arca');
-      const arcaConfig = JSON.parse(arcaConfigRow?.config || '{}');
+      const arcaRow = q('SELECT status, config FROM integrations WHERE id=?', 'arca');
+      if (!arcaRow || arcaRow.status !== 'CONNECTED') {
+        fail(400, 'La integración oficial con ARCA (ex AFIP) no está conectada. Configura tus credenciales fiscales en Integraciones antes de emitir comprobantes.', 'INTEGRATION_NOT_CONNECTED');
+      }
+      const arcaConfig = JSON.parse(arcaRow?.config || '{}');
+      if (!arcaConfig.cuit) {
+        fail(400, 'Falta configurar el CUIT emisor en los parámetros de la integración de ARCA.', 'CONFIG_INCOMPLETE');
+      }
 
       const arcaRes = await ARCAService.authorizeInvoice(arcaConfig, {
         cuit: arcaConfig.cuit || '30718293849',
@@ -1584,8 +1627,8 @@ async function handle(req, res) {
       if (!inv) fail(404, 'Comprobante fiscal no encontrado.');
       const p = q('SELECT * FROM patients WHERE workspaceId=? AND id=?', w, inv.patientId);
       const wk = q('SELECT * FROM workspaces WHERE id=?', w);
-      const arcaConfigRow = q('SELECT config FROM integrations WHERE id=?', 'arca');
-      const arcaConfig = JSON.parse(arcaConfigRow?.config || '{}');
+      const arcaRow = q('SELECT config FROM integrations WHERE id=?', 'arca');
+      const arcaConfig = JSON.parse(arcaRow?.config || '{}');
 
       const html = ARCAService.generateInvoiceHtml({
         invoice: inv,
@@ -2061,8 +2104,14 @@ async function handle(req, res) {
       const pat = patient(w, text(b.patientId, 'Paciente', 1, 100));
       const invoiceType = (b.invoiceType === 'C' || b.invoiceType === 'Factura C') ? 'C' : 'B';
       const tipoCompCode = invoiceType === 'C' ? 11 : 6;
-      const arcaConfigRow = q('SELECT config FROM integrations WHERE id=?', 'arca');
-      const arcaConfig = JSON.parse(arcaConfigRow?.config || '{}');
+      const arcaRow = q('SELECT status, config FROM integrations WHERE id=?', 'arca');
+      if (!arcaRow || arcaRow.status !== 'CONNECTED') {
+        fail(400, 'La integración oficial con ARCA (ex AFIP) no está conectada. Configura tus credenciales fiscales en Integraciones antes de emitir comprobantes.', 'INTEGRATION_NOT_CONNECTED');
+      }
+      const arcaConfig = JSON.parse(arcaRow?.config || '{}');
+      if (!arcaConfig.cuit) {
+        fail(400, 'Falta configurar el CUIT emisor en los parámetros de la integración de ARCA.', 'CONFIG_INCOMPLETE');
+      }
       const ptoVta = arcaConfig.puntoVenta || '0001';
 
       // Cálculo del número correlativo oficial de comprobante para la clínica
@@ -2374,13 +2423,13 @@ async function handle(req, res) {
             const rawPhone = String(row.phone || row.telefono || row.celular || '').trim();
             const cleanPhone = rawPhone ? phone(rawPhone) : `+54911${Math.floor(10000000 + Math.random() * 90000000)}`;
             const firstName = text(row.firstName || row.nombre || row.Nombre || 'Paciente', 'Nombre', 1, 80);
-            const lastName = text(row.lastName || row.apellido || row.Apellido || 'Omnia', 'Apellido', 1, 80);
+            const lastName = text(row.lastName || row.apellido || row.Apellido || 'Sin Apellido', 'Apellido', 1, 80);
             const email = optional(row.email || row.correo || row.Email, 'Email', 120) || '';
             const coverage = text(row.coverage || row.obraSocial || row.prepaga || row['Obra Social'] || 'Particular', 'Cobertura', 1, 100);
             const affiliateNumber = optional(row.affiliateNumber || row.nroAfiliado || row.afiliado, 'Nro Afiliado', 50) || '';
             const birthDate = optional(row.birthDate || row.fechaNacimiento || row['Fecha de Nacimiento'], 'Fecha Nac.', 20) || '';
             const cuitCuil = optional(row.cuitCuil || row.cuit || row.cuil, 'CUIT/CUIL', 20) || '';
-            const notes = optional(row.notes || row.observaciones || row.diagnostico, 'Notas', 1000) || 'Importado desde Omniasalud';
+            const notes = optional(row.notes || row.observaciones || row.diagnostico, 'Notas', 1000) || 'Importado vía padrón CSV / Excel';
 
             const medicalHistory = {
               allergies: row.allergies || row.alergias || 'Sin alergias reportadas',
@@ -2390,7 +2439,7 @@ async function handle(req, res) {
               familyHistory: row.familyHistory || row.heredofamiliares || '',
               habits: row.habits || row.habitos || '',
               updatedAt: now(),
-              updatedBy: 'Migración Omniasalud'
+              updatedBy: 'Importación Masiva de Padrón'
             };
 
             let existing = rawDni ? q('SELECT id FROM patients WHERE workspaceId=? AND dni=?', w, rawDni) : null;
@@ -2430,7 +2479,7 @@ async function handle(req, res) {
             skipped++;
           }
         }
-        audit(u, 'MIGRATION_OMNIA_IMPORTED', 'migration', uid(), `Importación masiva completada: ${imported} nuevos pacientes, ${updated} actualizados.`);
+        audit(u, 'MIGRATION_PATIENTS_IMPORTED', 'migration', uid(), `Importación masiva completada: ${imported} nuevos pacientes, ${updated} actualizados.`);
       });
 
       return json(res, 200, { ok: true, imported, updated, skipped, total: rows.length, errors });
