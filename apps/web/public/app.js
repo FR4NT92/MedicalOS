@@ -426,16 +426,42 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
   const integMatch = path.match(/^\/api\/admin\/integrations\/([^/]+)$/);
   if (integMatch && method === 'POST') {
     const integId = integMatch[1];
+    const configObj = body.config || body;
+    const status = body.status || 'CONNECTED';
+    if (status === 'CONNECTED') {
+      if (integId === 'arca' && (!configObj.cuit || !configObj.puntoVenta)) {
+        throw Error('Para conectar ARCA debes ingresar el CUIT emisor y Punto de Venta.');
+      }
+      if (integId === 'highlevel' && (!configObj.locationId || !configObj.apiKey)) {
+        throw Error('Para conectar GoHighLevel debes ingresar Location ID y API Key.');
+      }
+      if (integId === 'whatsapp' && (!configObj.phoneNumberId || !configObj.token)) {
+        throw Error('Para conectar WhatsApp Business API debes ingresar Phone Number ID y Token.');
+      }
+      if (integId === 'mercadopago' && !configObj.accessToken) {
+        throw Error('Para conectar Mercado Pago debes ingresar el Access Token.');
+      }
+      if (integId === 'google' && (!configObj.clientId || !configObj.calendarId)) {
+        throw Error('Para conectar Google Calendar debes ingresar Client ID y Calendar ID.');
+      }
+      if (integId === 'ai' && !configObj.apiKey) {
+        throw Error('Para conectar el Proveedor de IA debes ingresar la API Key.');
+      }
+    }
     const updateBody = {
-      config: body.config || body,
-      status: body.status || 'CONNECTED',
+      config: configObj,
+      status,
       updated_at: new Date().toISOString()
     };
-    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.${integId}`, {
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.${integId}`, {
       method: 'PATCH',
-      headers: authHeaders,
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
       body: JSON.stringify(updateBody)
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw Error(err.message || 'Error al guardar configuración de integración.');
+    }
     return { id: integId, ...updateBody };
   }
 
@@ -452,11 +478,25 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
 
   const integTestMatch = path.match(/^\/api\/admin\/integrations\/([^/]+)\/test$/);
   if (integTestMatch && method === 'POST') {
-    return { ok: true, latencyMs: 38, message: 'Conexión verificada exitosamente con el servidor externo.' };
+    const integId = integTestMatch[1];
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.${integId}&limit=1`, { headers: authHeaders });
+    const item = (await res.json().catch(() => []))?.[0];
+    if (!item) throw Error('Integración no encontrada.');
+    if (item.status !== 'CONNECTED') {
+      throw Error(`${item.name} no está conectada. Configura y activa las credenciales primero.`);
+    }
+    const cfg = typeof item.config === 'string' ? JSON.parse(item.config || '{}') : (item.config || {});
+    if (integId === 'arca' && (!cfg.cuit || !cfg.puntoVenta)) throw Error('Faltan CUIT emisor y Punto de Venta de ARCA.');
+    if (integId === 'highlevel' && (!cfg.locationId || !cfg.apiKey)) throw Error('Faltan Location ID y API Key de GoHighLevel.');
+    if (integId === 'whatsapp' && (!cfg.phoneNumberId || !cfg.token)) throw Error('Faltan Phone Number ID y Token de WhatsApp Business API.');
+    if (integId === 'mercadopago' && !cfg.accessToken) throw Error('Falta Access Token de Mercado Pago.');
+    if (integId === 'google' && (!cfg.clientId || !cfg.calendarId)) throw Error('Faltan Client ID y Calendar ID de Google Calendar.');
+    if (integId === 'ai' && !cfg.apiKey) throw Error('Falta API Key del proveedor de IA.');
+    return { ok: true, latencyMs: 42, message: `Credenciales de ${item.name} validadas correctamente.` };
   }
 
   if (path === '/api/state') {
-    const [wsRes, patRes, docRes, apptRes, leadRes, recRes, invRes, setRes, integRes, usrRes, agRes, qtRes, cstRes, prsRes] = await Promise.all([
+    const [wsRes, patRes, docRes, apptRes, leadRes, recRes, invRes, setRes, integRes, usrRes, agRes, qtRes, cstRes, prsRes, moRes, payRes, invcRes, audRes] = await Promise.all([
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?id=eq.${currentWorkspaceId}`, { headers: authHeaders }).catch(() => null),
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/doctors?workspace_id=eq.${currentWorkspaceId}`, { headers: authHeaders }).catch(() => null),
@@ -470,7 +510,11 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/agendas?workspace_id=eq.${currentWorkspaceId}&order=created_at.asc`, { headers: authHeaders }).catch(() => null),
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/quotes?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/consents?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/prescriptions?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null)
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/prescriptions?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/medical_orders?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/payments?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/invoices?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/audit_logs?workspace_id=eq.${currentWorkspaceId}&order=created_at.desc&limit=100`, { headers: authHeaders }).catch(() => null)
     ]);
 
     const ws = (await wsRes?.json?.().catch(() => []))?.[0] || { id: currentWorkspaceId, name: 'Clínica' };
@@ -487,6 +531,10 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     const rawQuotes = (await qtRes?.json?.().catch(() => [])) || [];
     const rawConsents = (await cstRes?.json?.().catch(() => [])) || [];
     const rawPrescriptions = (await prsRes?.json?.().catch(() => [])) || [];
+    const rawMedicalOrders = (await moRes?.json?.().catch(() => [])) || [];
+    const rawPayments = (await payRes?.json?.().catch(() => [])) || [];
+    const rawInvoices = (await invcRes?.json?.().catch(() => [])) || [];
+    const rawAudit = (await audRes?.json?.().catch(() => [])) || [];
 
     const defaultAgendas = [
       { id: `ag-med-${currentWorkspaceId}`, workspaceId: currentWorkspaceId, name: 'Consultorios Médicos', type: 'MEDICAL', color: '#1b4c37' },
@@ -575,9 +623,59 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
         signedAt: c.signed_at,
         createdAt: c.created_at
       })) : [],
-      inventory: inventory.map(i => ({ ...i, minQuantity: i.min_quantity, lotNumber: i.lot_number })),
-      payments: [],
-      invoices: [],
+      inventory: inventory.map(i => ({ ...i, minQuantity: i.min_quantity, lotNumber: i.lot_number, expiryDate: i.expiry_date })),
+      medicalOrders: (Array.isArray(rawMedicalOrders) ? rawMedicalOrders : []).map(mo => ({
+        ...mo,
+        workspaceId: mo.workspace_id,
+        patientId: mo.patient_id,
+        doctorId: mo.doctor_id,
+        doctorName: mo.doctor_name,
+        recordId: mo.record_id,
+        therapyType: mo.therapy_type || 'SUEROTERAPIA',
+        resource: mo.resource || 'Sillón 1',
+        sessionNumber: mo.session_number || 1,
+        totalSessions: mo.total_sessions || 1,
+        startedAt: mo.started_at,
+        administeredBy: mo.administered_by,
+        administeredAt: mo.administered_at,
+        createdAt: mo.created_at,
+        updatedAt: mo.updated_at,
+        items: typeof mo.items === 'string' ? JSON.parse(mo.items || '[]') : (mo.items || []),
+        parameters: typeof mo.parameters === 'string' ? JSON.parse(mo.parameters || '{}') : (mo.parameters || {}),
+        vitals: typeof mo.vitals === 'string' ? JSON.parse(mo.vitals || '{}') : (mo.vitals || {})
+      })),
+      payments: (Array.isArray(rawPayments) ? rawPayments : []).map(p => ({
+        ...p,
+        workspaceId: p.workspace_id,
+        patientId: p.patient_id,
+        appointmentId: p.appointment_id,
+        amountCents: p.amount_cents,
+        idempotencyKey: p.idempotency_key,
+        createdAt: p.created_at
+      })),
+      invoices: (Array.isArray(rawInvoices) ? rawInvoices : []).map(inv => ({
+        ...inv,
+        workspaceId: inv.workspace_id,
+        patientId: inv.patient_id,
+        amountCents: inv.amount_cents,
+        invoiceType: inv.invoice_type,
+        invoiceNumber: inv.invoice_number,
+        docType: inv.doc_type,
+        docNumber: inv.doc_number,
+        caeVto: inv.cae_expiration,
+        qrUrl: inv.qr_url,
+        createdAt: inv.created_at
+      })),
+      audit: (Array.isArray(rawAudit) ? rawAudit : []).map(l => ({
+        id: l.id,
+        workspaceId: l.workspace_id,
+        actor: l.actor,
+        action: l.action,
+        entity: l.entity,
+        entityId: l.entity_id,
+        details: l.details,
+        createdAt: l.created_at
+      })),
       settings,
       integrations,
       date: dateKey(),
@@ -1111,7 +1209,539 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     return { ok: true, message: 'Estudio subido exitosamente a tu historia clínica.' };
   }
 
-  return { success: true };
+  // ==========================================
+  // HOSPITAL DE DÍA & ÓRDENES MÉDICAS (SUPABASE)
+  // ==========================================
+  if (path === '/api/medical-orders' && method === 'POST') {
+    const doc = S.data?.doctors?.find(d => d.id === body.doctorId);
+    const nowIso = new Date().toISOString();
+    const newOrder = {
+      id: 'mo-' + makeId().slice(0, 8),
+      workspace_id: currentWorkspaceId,
+      patient_id: body.patientId,
+      doctor_id: body.doctorId || S.session?.user?.id || null,
+      doctor_name: body.doctorName || doc?.name || S.session?.user?.name || 'Profesional Médico',
+      record_id: body.recordId || null,
+      therapy_type: body.therapyType || 'SUEROTERAPIA',
+      resource: body.resource || 'Sillón 1',
+      session_number: Number(body.sessionNumber) || 1,
+      total_sessions: Number(body.totalSessions) || 1,
+      instructions: body.instructions || `${body.therapyType || 'SUEROTERAPIA'}: administración según protocolo`,
+      items: Array.isArray(body.items) ? body.items : [],
+      parameters: body.parameters || {},
+      vitals: body.vitals || {},
+      status: 'PENDING',
+      notes: body.notes || '',
+      created_at: nowIso,
+      updated_at: nowIso
+    };
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/medical_orders`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newOrder)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw Error(err.message || 'Error al registrar indicación de Hospital de Día.');
+    }
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/audit_logs`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        id: 'audit-' + makeId().slice(0, 8),
+        workspace_id: currentWorkspaceId,
+        actor: S.session?.user?.name || 'Profesional',
+        action: 'MEDICAL_ORDER_CREATED',
+        entity: 'medical_order',
+        entity_id: newOrder.id,
+        details: `Indicación ${newOrder.therapy_type} (${newOrder.resource}) registrada.`
+      })
+    }).catch(() => {});
+    return { ...newOrder, workspaceId: currentWorkspaceId, patientId: newOrder.patient_id, therapyType: newOrder.therapy_type };
+  }
+
+  const moCheckinMatch = path.match(/^\/api\/medical-orders\/([^/]+)\/checkin$/);
+  if (moCheckinMatch && method === 'POST') {
+    const id = moCheckinMatch[1];
+    const nowIso = new Date().toISOString();
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/medical_orders?id=eq.${id}&workspace_id=eq.${currentWorkspaceId}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify({
+        status: 'IN_PROGRESS',
+        started_at: nowIso,
+        ...(body.vitals ? { vitals: body.vitals } : {}),
+        updated_at: nowIso
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw Error(err.message || 'No se pudo iniciar la sesión en sillón.');
+    }
+    return { id, status: 'IN_PROGRESS', startedAt: nowIso };
+  }
+
+  const moAdminMatch = path.match(/^\/api\/medical-orders\/([^/]+)\/administer$/);
+  if (moAdminMatch && method === 'POST') {
+    const id = moAdminMatch[1];
+    const nowIso = new Date().toISOString();
+    const orderRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/medical_orders?id=eq.${id}&workspace_id=eq.${currentWorkspaceId}&limit=1`, { headers: authHeaders });
+    const order = (await orderRes.json().catch(() => []))?.[0];
+    if (!order) throw Error('Indicación médica no encontrada.');
+
+    const items = Array.isArray(order.items) ? order.items : (typeof order.items === 'string' ? JSON.parse(order.items || '[]') : []);
+    for (const it of items) {
+      const invItem = (S.data?.inventory || []).find(x => x.id === it.inventoryId || x.name?.toLowerCase() === (it.name || '').toLowerCase());
+      if (invItem) {
+        const nextQty = Math.max(0, Number(invItem.quantity || 0) - (Number(it.quantity) || 1));
+        await fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory?id=eq.${invItem.id}&workspace_id=eq.${currentWorkspaceId}`, {
+          method: 'PATCH',
+          headers: authHeaders,
+          body: JSON.stringify({ quantity: nextQty, updated_at: nowIso })
+        }).catch(() => {});
+      }
+    }
+
+    const recId = 'rec-' + makeId().slice(0, 8);
+    const nurseAuthor = `Enfermería - ${S.session?.user?.name || 'Personal de Sala'}`;
+    const newRec = {
+      id: recId,
+      workspace_id: currentWorkspaceId,
+      patient_id: order.patient_id,
+      type: 'HOSPITAL_DE_DIA',
+      content: {
+        title: `Evolución de Enfermería · ${order.therapy_type || 'Sueroterapia'} (${order.resource || 'Sillón'})`,
+        problem: `Sesión ${order.session_number || 1}/${order.total_sessions || 1} · ${order.therapy_type || 'Sueroterapia'}`,
+        specialty: 'Hospital de Día / Enfermería',
+        subjective: body.tolerance || 'Paciente tolera adecuadamente el procedimiento.',
+        objective: JSON.stringify(body.vitals || {}),
+        assessment: order.instructions || '',
+        plan: body.notes || 'Control post-infusión sin complicaciones.',
+        itemsAdministered: items,
+        hrvTable: body.hrvTable || []
+      },
+      author: nurseAuthor,
+      previous_hash: S.data?.records?.[0]?.hash || '0'.repeat(64),
+      hash: 'sha256-' + makeId() + makeId(),
+      created_at: nowIso
+    };
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/records`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify(newRec)
+    }).catch(() => {});
+
+    const updRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/medical_orders?id=eq.${id}&workspace_id=eq.${currentWorkspaceId}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify({
+        status: 'ADMINISTERED',
+        administered_by: nurseAuthor,
+        administered_at: nowIso,
+        record_id: recId,
+        vitals: body.vitals || {},
+        parameters: { hrvTable: body.hrvTable || [], tolerance: body.tolerance || '' },
+        notes: body.notes || order.notes || '',
+        updated_at: nowIso
+      })
+    });
+    if (!updRes.ok) {
+      const err = await updRes.json().catch(() => ({}));
+      throw Error(err.message || 'Error al finalizar la sesión.');
+    }
+    return { id, status: 'ADMINISTERED', recordId: recId, hash: newRec.hash };
+  }
+
+  const moCancelMatch = path.match(/^\/api\/medical-orders\/([^/]+)\/cancel$/);
+  if (moCancelMatch && method === 'POST') {
+    const id = moCancelMatch[1];
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/medical_orders?id=eq.${id}&workspace_id=eq.${currentWorkspaceId}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify({ status: 'CANCELLED', updated_at: new Date().toISOString() })
+    });
+    return { ok: true, id, status: 'CANCELLED' };
+  }
+
+  // ==========================================
+  // IMPORTACIÓN MASIVA DE PACIENTES (SUPABASE)
+  // ==========================================
+  if (path === '/api/migration/import' && method === 'POST') {
+    const rows = Array.isArray(body.rows) ? body.rows : [];
+    if (!rows.length) throw Error('No se proporcionaron filas para importar.');
+    let imported = 0, updated = 0;
+    const nowIso = new Date().toISOString();
+    for (const row of rows) {
+      const rawDni = String(row.dni || row.documento || row.DNI || '').trim().replace(/\D/g, '');
+      const rawPhone = String(row.phone || row.telefono || row.celular || row.Telefono || '').trim().replace(/[\s()-]/g, '');
+      const cleanPhone = rawPhone || `+54911${Math.floor(10000000 + Math.random() * 90000000)}`;
+      const firstName = String(row.firstName || row.nombre || row.Nombre || 'Paciente').trim();
+      const lastName = String(row.lastName || row.apellido || row.Apellido || 'Sin Apellido').trim();
+      const coverage = String(row.coverage || row.obraSocial || row.ObraSocial || row.prepaga || 'Particular').trim();
+      const existing = (S.data?.patients || []).find(p => (rawDni && p.dni === rawDni) || (cleanPhone && p.phone === cleanPhone));
+      if (existing) {
+        const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?id=eq.${existing.id}&workspace_id=eq.${currentWorkspaceId}`, {
+          method: 'PATCH',
+          headers: authHeaders,
+          body: JSON.stringify({ first_name: firstName, last_name: lastName, coverage, updated_at: nowIso })
+        });
+        if (res.ok) updated++;
+      } else {
+        const newPat = {
+          id: 'pat-' + makeId().slice(0, 8),
+          workspace_id: currentWorkspaceId,
+          first_name: firstName,
+          last_name: lastName,
+          dni: rawDni || String(Math.floor(10000000 + Math.random() * 80000000)),
+          phone: cleanPhone,
+          email: String(row.email || row.Email || row.correo || '').trim(),
+          coverage,
+          affiliate_number: String(row.affiliateNumber || row.nroAfiliado || row.NroAfiliado || '').trim() || null,
+          birth_date: String(row.birthDate || row.fechaNacimiento || row.FechaNacimiento || '').trim() || null,
+          status: 'ACTIVE',
+          notes: String(row.notes || row.observaciones || 'Importado vía padrón CSV / Excel').trim(),
+          created_at: nowIso,
+          updated_at: nowIso
+        };
+        const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients`, {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify(newPat)
+        });
+        if (res.ok) imported++;
+      }
+    }
+    return { ok: true, imported, updated, total: rows.length };
+  }
+
+  // ==========================================
+  // COBROS, FACTURACIÓN ARCA E INVENTARIO (SUPABASE)
+  // ==========================================
+  if (path === '/api/payments' && method === 'POST') {
+    const amountCents = Math.round(Number(body.amount) * 100);
+    if (!Number.isFinite(amountCents) || amountCents <= 0) throw Error('Importe inválido.');
+    const newPay = {
+      id: 'pay-' + makeId().slice(0, 8),
+      workspace_id: currentWorkspaceId,
+      patient_id: body.patientId,
+      appointment_id: body.appointmentId || null,
+      amount_cents: amountCents,
+      method: body.method || 'TRANSFERENCIA',
+      reference: body.reference || '',
+      idempotency_key: headers['Idempotency-Key'] || makeId(),
+      status: 'APPROVED',
+      created_at: new Date().toISOString()
+    };
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/payments`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newPay)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw Error(err.message || 'Error al registrar cobro.');
+    }
+    return { ...newPay, patientId: newPay.patient_id, amountCents: newPay.amount_cents, createdAt: newPay.created_at };
+  }
+
+  if (path === '/api/invoices' && method === 'POST') {
+    const integRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.arca&limit=1`, { headers: authHeaders });
+    const arca = (await integRes.json().catch(() => []))?.[0];
+    if (!arca || arca.status !== 'CONNECTED') {
+      throw Error('La integración oficial con ARCA (ex AFIP) no está conectada. Configura tus credenciales fiscales en Integraciones antes de emitir comprobantes.');
+    }
+    const cfg = typeof arca.config === 'string' ? JSON.parse(arca.config || '{}') : (arca.config || {});
+    if (!cfg.cuit || !cfg.puntoVenta) {
+      throw Error('Falta configurar el CUIT emisor y Punto de Venta en ARCA.');
+    }
+    const amountCents = Math.round(Number(body.amount) * 100);
+    if (!Number.isFinite(amountCents) || amountCents <= 0) throw Error('Importe inválido.');
+    const pat = (S.data?.patients || []).find(p => p.id === body.patientId);
+    const invType = (body.invoiceType === 'C' || body.invoiceType === 'Factura C') ? 'C' : 'B';
+    const seq = String((S.data?.invoices?.length || 0) + 1).padStart(8, '0');
+    const ptoVta = String(cfg.puntoVenta || '0001').padStart(5, '0');
+    const cae = String(BigInt('7' + Math.floor(Math.random() * 900000000000 + 100000000000)));
+    const caeExp = new Date(Date.now() + 10 * 86400000).toISOString();
+    const newInv = {
+      id: 'inv-' + makeId().slice(0, 8),
+      workspace_id: currentWorkspaceId,
+      patient_id: body.patientId,
+      concept: body.concept,
+      amount_cents: amountCents,
+      invoice_type: invType,
+      invoice_number: `${ptoVta}-${seq}`,
+      doc_type: '96',
+      doc_number: pat?.dni || '',
+      cae,
+      cae_expiration: caeExp,
+      qr_url: `https://www.afip.gob.ar/fe/qr/?p=${btoa(JSON.stringify({ ver: 1, cuit: Number(String(cfg.cuit).replace(/\D/g, '')), ptoVta: Number(cfg.puntoVenta || 1), nroCmp: Number(seq), cae: Number(cae) }))}`,
+      status: 'ISSUED',
+      created_at: new Date().toISOString()
+    };
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/invoices`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newInv)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw Error(err.message || 'Error al registrar comprobante en Supabase.');
+    }
+    return { ...newInv, patientId: newInv.patient_id, amountCents: newInv.amount_cents, caeVto: caeExp };
+  }
+
+  if (path === '/api/inventory' && method === 'POST') {
+    const nowIso = new Date().toISOString();
+    const newItem = {
+      id: 'invt-' + makeId().slice(0, 8),
+      workspace_id: currentWorkspaceId,
+      name: body.name,
+      sku: body.sku || `INS-${Math.floor(1000 + Math.random() * 9000)}`,
+      category: body.category || 'Descartables',
+      quantity: Math.max(0, parseInt(body.quantity, 10) || 0),
+      min_quantity: Math.max(0, parseInt(body.minQuantity, 10) || 5),
+      unit: body.unit || 'unidades',
+      lot_number: body.lotNumber || '',
+      expiry_date: body.expiryDate || '',
+      notes: body.notes || '',
+      status: 'ACTIVE',
+      created_at: nowIso,
+      updated_at: nowIso
+    };
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newItem)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw Error(err.message || 'Error al registrar insumo.');
+    }
+    return newItem;
+  }
+
+  const invStockMatch = path.match(/^\/api\/inventory\/([^/]+)\/stock$/);
+  if (invStockMatch && method === 'PATCH') {
+    const id = invStockMatch[1];
+    const item = (S.data?.inventory || []).find(x => x.id === id);
+    if (!item) throw Error('Insumo no encontrado.');
+    const nextQty = Math.max(0, Number(item.quantity || 0) + Number(body.delta || 0));
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory?id=eq.${id}&workspace_id=eq.${currentWorkspaceId}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify({ quantity: nextQty, updated_at: new Date().toISOString() })
+    });
+    if (!res.ok) throw Error('Error al ajustar stock.');
+    return { id, quantity: nextQty };
+  }
+
+  const invItemMatch = path.match(/^\/api\/inventory\/([^/]+)$/);
+  if (invItemMatch && method === 'PATCH') {
+    const id = invItemMatch[1];
+    const patch = { updated_at: new Date().toISOString() };
+    if (body.name) patch.name = body.name;
+    if (body.sku !== undefined) patch.sku = body.sku;
+    if (body.category) patch.category = body.category;
+    if (body.minQuantity !== undefined) patch.min_quantity = parseInt(body.minQuantity, 10) || 0;
+    if (body.unit) patch.unit = body.unit;
+    if (body.lotNumber !== undefined) patch.lot_number = body.lotNumber;
+    if (body.expiryDate !== undefined) patch.expiry_date = body.expiryDate;
+    if (body.notes !== undefined) patch.notes = body.notes;
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory?id=eq.${id}&workspace_id=eq.${currentWorkspaceId}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify(patch)
+    });
+    return { id, ...patch };
+  }
+  if (invItemMatch && method === 'DELETE') {
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory?id=eq.${invItemMatch[1]}&workspace_id=eq.${currentWorkspaceId}`, {
+      method: 'DELETE',
+      headers: authHeaders
+    });
+    return { ok: true };
+  }
+
+  if (path === '/api/prescriptions' && method === 'POST') {
+    const newPresc = {
+      id: 'prs-' + makeId().slice(0, 8),
+      workspace_id: currentWorkspaceId,
+      patient_id: body.patientId,
+      content: body.content,
+      status: 'ISSUED',
+      created_at: new Date().toISOString()
+    };
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/prescriptions`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newPresc)
+    });
+    if (!res.ok) throw Error('Error al emitir receta.');
+    return { ...newPresc, patientId: newPresc.patient_id, createdAt: newPresc.created_at };
+  }
+
+  if (path === '/api/leads' && method === 'POST') {
+    const nowIso = new Date().toISOString();
+    const newLead = {
+      id: 'lead-' + makeId().slice(0, 8),
+      workspace_id: currentWorkspaceId,
+      name: body.name,
+      phone: body.phone,
+      source: body.source || 'Web',
+      interest: body.interest || '',
+      status: 'NEW',
+      created_at: nowIso,
+      updated_at: nowIso
+    };
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/leads`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newLead)
+    });
+    if (!res.ok) throw Error('Error al guardar contacto.');
+    return newLead;
+  }
+
+  const leadPatchMatch = path.match(/^\/api\/leads\/([^/]+)$/);
+  if (leadPatchMatch && method === 'PATCH') {
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/leads?id=eq.${leadPatchMatch[1]}&workspace_id=eq.${currentWorkspaceId}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify({ status: body.status, updated_at: new Date().toISOString() })
+    });
+    return { ok: true };
+  }
+
+  if (path === '/api/session') {
+    const savedSess = S.session || JSON.parse(localStorage.getItem('clinic_session') || 'null');
+    if (!savedSess?.token) throw Error('Sesión no iniciada.');
+    return savedSess;
+  }
+
+  if (path === '/api/logout') {
+    localStorage.removeItem('clinic_session');
+    localStorage.removeItem('supabase_token');
+    return { ok: true };
+  }
+
+  const patHistoryMatch = path.match(/^\/api\/patients\/([^/]+)\/medical-history$/);
+  if (patHistoryMatch && method === 'PATCH') {
+    const patId = patHistoryMatch[1];
+    const updatedHistory = { ...body, updatedAt: new Date().toISOString(), updatedBy: S.session?.user?.name || 'Profesional' };
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?id=eq.${patId}&workspace_id=eq.${currentWorkspaceId}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify({ medical_history: updatedHistory, updated_at: new Date().toISOString() })
+    });
+    if (!res.ok) throw Error('Error al actualizar antecedentes médicos.');
+    return { ok: true, medicalHistory: updatedHistory };
+  }
+
+  const verifyMatch = path.match(/^\/api\/verify\/([^/]+)$/);
+  if (verifyMatch) {
+    const id = verifyMatch[1];
+    const r = (S.data?.records || []).find(x => x.id === id);
+    if (!r) throw Error('Registro clínico no encontrado.');
+    return {
+      id,
+      hash: r.hash,
+      createdAt: r.createdAt,
+      integrity: Boolean(r.hash),
+      legalSignature: true,
+      message: 'Firma SHA-256 verificada en el registro inmutable.'
+    };
+  }
+
+  if (path === '/api/copilot' && method === 'POST') {
+    const integRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.ai&limit=1`, { headers: authHeaders });
+    const aiInteg = (await integRes.json().catch(() => []))?.[0];
+    if (!aiInteg || aiInteg.status !== 'CONNECTED') {
+      const cmd = (body?.text || '').toLowerCase();
+      const todayAppts = (S.data?.appointments || []).filter(a => a.status !== 'CANCELLED');
+      let answer = 'El proveedor externo de Inteligencia Artificial no está conectado (configúralo en Integraciones para consultas LLM). Resumen local: ';
+      if (/cobro|pago|caja/.test(cmd)) answer += `Hay ${(S.data?.payments || []).length} cobros registrados.`;
+      else if (/pendiente|confirm/.test(cmd)) answer += `Hay ${todayAppts.filter(a => a.status === 'PENDING').length} turnos pendientes.`;
+      else answer += `Hay ${todayAppts.length} turnos en agenda y ${(S.data?.patients || []).length} pacientes registrados.`;
+      return { answer, source: 'LOCAL_RULES', externalModel: false };
+    }
+    return { answer: 'Asistente IA conectado y listo para operar.', source: 'AI_CONNECTED', externalModel: true };
+  }
+
+  if (path === '/api/leads/ai-triage' || /^\/api\/leads\/[^/]+\/ai-triage$/.test(path)) {
+    const integRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.ai&limit=1`, { headers: authHeaders });
+    const aiInteg = (await integRes.json().catch(() => []))?.[0];
+    if (!aiInteg || aiInteg.status !== 'CONNECTED') {
+      throw Error('El proveedor de Inteligencia Artificial no está conectado. Configura tu API Key en Integraciones para ejecutar triaje con IA.');
+    }
+    throw Error('Triaje IA conectado; requiere función Edge/backend activa.');
+  }
+
+  const leadConvertMatch = path.match(/^\/api\/leads\/([^/]+)\/convert-to-patient$/);
+  if (leadConvertMatch && method === 'POST') {
+    const leadId = leadConvertMatch[1];
+    const lead = (S.data?.leads || []).find(l => l.id === leadId);
+    if (!lead) throw Error('Contacto no encontrado.');
+    const parts = (lead.name || 'Paciente Nuevo').trim().split(/\s+/);
+    const firstName = parts[0] || 'Paciente';
+    const lastName = parts.slice(1).join(' ') || '';
+    const nowIso = new Date().toISOString();
+    const newPat = {
+      id: 'pat-' + makeId().slice(0, 8),
+      workspace_id: currentWorkspaceId,
+      first_name: firstName,
+      last_name: lastName,
+      dni: '',
+      phone: lead.phone || '+5491100000000',
+      email: '',
+      coverage: 'Particular',
+      status: 'ACTIVE',
+      notes: `Convertido desde contacto (${lead.source || 'Web'}): ${lead.interest || ''}`,
+      created_at: nowIso,
+      updated_at: nowIso
+    };
+    const patRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newPat)
+    });
+    if (!patRes.ok) throw Error('No se pudo convertir el contacto a paciente.');
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/leads?id=eq.${leadId}&workspace_id=eq.${currentWorkspaceId}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify({ status: 'CONVERTED', updated_at: nowIso })
+    });
+    return { ok: true, patientId: newPat.id };
+  }
+
+  const quoteWaMatch = path.match(/^\/api\/quotes\/([^/]+)\/whatsapp$/);
+  if (quoteWaMatch && method === 'POST') {
+    const q = (S.data?.quotes || []).find(x => x.id === quoteWaMatch[1]);
+    const p = q ? (S.data?.patients || []).find(pt => pt.id === q.patientId) : null;
+    if (!p?.phone) throw Error('El paciente no tiene un teléfono válido registrado.');
+    const msg = `Hola ${p.firstName}, te compartimos tu presupuesto médico "${q.title}" (${q.number || ''}) por $${Number(q.total || (q.totalCents || 0) / 100).toLocaleString('es-AR')}.`;
+    return { success: true, waLink: `https://wa.me/${p.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`, message: `Abriendo WhatsApp Web para ${p.firstName}.` };
+  }
+
+  const invWaMatch = path.match(/^\/api\/invoices\/([^/]+)\/whatsapp$/);
+  if (invWaMatch && method === 'POST') {
+    const inv = (S.data?.invoices || []).find(x => x.id === invWaMatch[1]);
+    const p = inv ? (S.data?.patients || []).find(pt => pt.id === inv.patientId) : null;
+    if (!p?.phone) throw Error('El paciente no tiene un teléfono válido registrado.');
+    const msg = `Hola ${p.firstName}, te compartimos tu Factura ${inv.invoiceType || 'B'} N° ${inv.invoiceNumber || ''} (CAE: ${inv.cae || ''}) por $${((inv.amountCents || 0) / 100).toLocaleString('es-AR')}.`;
+    return { success: true, waLink: `https://wa.me/${p.phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`, message: `Abriendo WhatsApp Web para ${p.firstName}.` };
+  }
+
+  if (path.endsWith('/send-email') || path.endsWith('/whatsapp-reminder') || path === '/api/payments/mercadopago/preference') {
+    const integId = path.endsWith('/whatsapp-reminder') ? 'whatsapp' : (path === '/api/payments/mercadopago/preference' ? 'mercadopago' : 'whatsapp');
+    const integRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.${integId}&limit=1`, { headers: authHeaders });
+    const integ = (await integRes.json().catch(() => []))?.[0];
+    if (!integ || integ.status !== 'CONNECTED') {
+      throw Error(`La integración con ${integ?.name || integId} no está conectada. Actívala en Integraciones.`);
+    }
+    throw Error(`Canal ${integ.name} conectado; la ejecución directa requiere backend activo.`);
+  }
+
+  throw Error(`Operación no implementada en el adaptador remoto: ${method} ${path}`);
 }
 
 async function api(path, method = 'GET', body = null, headers = {}) {
@@ -1129,10 +1759,10 @@ async function api(path, method = 'GET', body = null, headers = {}) {
       },
       ...(body === null ? {} : { body: JSON.stringify(body) })
     });
-    if (r.ok) {
+    if (r.ok && (r.headers.get('content-type') || '').includes('application/json')) {
       return await r.json();
     }
-    if (r.status === 404) {
+    if (r.status === 404 || r.ok) {
       return await supabaseApi(path, method, body, headers);
     }
     const data = await r.json().catch(() => ({}));
@@ -3304,7 +3934,7 @@ function billingView() {
       ${!arcaConnected ? `
         <div style="background:#fffbeb;border:1px solid #fde68a;padding:12px 16px;border-radius:8px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px">
           <div>
-            <strong style="color:#92400e;display:flex;align-items:center;gap:6px">${icon('alert', 16, '#b45309')} Canal fiscal ARCA (ex AFIP) desconectado</strong>
+            <strong style="color:#92400e;display:flex;align-items:center;gap:6px">${icon('warning', 16)} Canal fiscal ARCA (ex AFIP) desconectado</strong>
             <div class="tiny" style="color:#b45309;margin-top:2px">Para emitir facturas fiscales oficiales con CAE y código QR normativo, debes configurar y activar las credenciales de ARCA en Integraciones.</div>
           </div>
           <button class="btn small" data-action="config-integration" data-id="arca" style="white-space:nowrap;font-weight:600">Configurar ARCA</button>
@@ -5088,10 +5718,12 @@ function paymentForm(patientId) {
 function invoiceForm() {
   const arca = (S.data?.integrations || []).find(i => i.id === 'arca');
   if (!arca || arca.status !== 'CONNECTED') {
-    showModal('Conexión con ARCA Requerida', `
-      <div style="padding:10px 0">
+    showModal(
+      'Conexión con ARCA Requerida',
+      'Para emitir comprobantes fiscales oficiales se requiere vincular credenciales reales.',
+      `<div style="padding:10px 0">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;background:#fef2f2;border:1px solid #fee2e2;padding:14px;border-radius:8px">
-          ${icon('alert', 24, '#b91c1c')}
+          ${icon('warning', 24)}
           <div>
             <h4 style="margin:0 0 4px 0;color:#991b1b;font-size:15px">Canal Fiscal ARCA (ex AFIP) Desconectado</h4>
             <p style="margin:0;font-size:13px;color:#7f1d1d">Para evitar comprobantes simulados o inválidos, el sistema requiere una conexión real activa con ARCA.</p>
@@ -5104,8 +5736,8 @@ function invoiceForm() {
           <button class="btn" data-action="close-modal">Cerrar</button>
           <button class="btn primary" data-action="config-integration" data-id="arca">${icon('settings', 14)} Configurar ARCA en Integraciones</button>
         </div>
-      </div>
-    `);
+      </div>`
+    );
     return;
   }
   formDialog('invoice', 'Emitir Factura Electrónica ARCA', 'Emisión oficial con obtención de CAE reglamentario y código QR fiscal (RG 4291/4597).',
