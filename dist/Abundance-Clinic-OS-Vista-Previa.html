@@ -276,6 +276,19 @@
 /* ==========================================================================
    PANTALLA DE INICIO / LOGIN FULLSCREEN VERDE OSCURO (Mockup Oficial)
    ========================================================================== */
+@keyframes loginGradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 35%; }
+  100% { background-position: 20% 70%; }
+}
+@keyframes loginRingPulse {
+  0%, 100% { transform: scale(1); opacity: 0.72; }
+  50% { transform: scale(1.055); opacity: 1; }
+}
+@keyframes loginGlowDrift {
+  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.45; }
+  50% { transform: translate(-40px, 30px) scale(1.12); opacity: 0.7; }
+}
 .login-page {
   min-height: 100vh !important;
   width: 100% !important;
@@ -283,7 +296,9 @@
   align-items: center !important;
   justify-content: center !important;
   padding: 40px 24px !important;
-  background: radial-gradient(circle at 85% 15%, #1d4d38 0%, #0d281e 50%, #071912 100%) !important;
+  background: radial-gradient(circle at 82% 18%, #215840 0%, #0e2c21 48%, #071912 100%) !important;
+  background-size: 150% 150% !important;
+  animation: loginGradientShift 18s ease-in-out infinite alternate !important;
   position: relative !important;
   overflow: hidden !important;
   box-sizing: border-box !important;
@@ -295,10 +310,28 @@
   left: -200px;
   width: 720px;
   height: 720px;
-  border: 1px solid rgba(168, 224, 182, 0.09);
+  border: 1px solid rgba(168, 224, 182, 0.11);
   border-radius: 50%;
-  box-shadow: 0 0 0 90px rgba(168, 224, 182, 0.04), 0 0 0 190px rgba(168, 224, 182, 0.02);
+  box-shadow: 0 0 0 90px rgba(168, 224, 182, 0.045), 0 0 0 190px rgba(168, 224, 182, 0.022);
   pointer-events: none;
+  animation: loginRingPulse 9s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+.login-page::after {
+  content: '';
+  position: absolute;
+  top: -160px;
+  right: -120px;
+  width: 520px;
+  height: 520px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(139, 225, 168, 0.14) 0%, rgba(139, 225, 168, 0) 70%);
+  pointer-events: none;
+  animation: loginGlowDrift 14s ease-in-out infinite alternate;
+  will-change: transform, opacity;
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-page, .login-page::before, .login-page::after { animation: none !important; }
 }
 .login-container-inner {
   display: grid;
@@ -331,15 +364,14 @@
 .login-badge-pill {
   display: inline-block;
   align-self: flex-start;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 2px;
+  letter-spacing: 2.2px;
   text-transform: uppercase;
   color: #a4e3b7;
-  background: rgba(164, 227, 183, 0.12);
-  border: 1px solid rgba(164, 227, 183, 0.25);
-  padding: 5px 12px;
-  border-radius: 999px;
+  padding: 0;
+  background: transparent;
+  border: none;
 }
 .login-hero-left h1 {
   font-size: 38px;
