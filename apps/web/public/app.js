@@ -1913,34 +1913,72 @@ function loginPage(error = '') {
         <p>Gestión médica unificada: agendas coordinadas, historias clínicas electrónicas, seguimiento de pacientes y facturación integrada.</p>
       </section>
       <section class="login-form-side">
-        <div class="login-card-white">
-          <h2>Acceso al Sistema</h2>
-          <p class="login-desc">Ingresa tus credenciales profesionales autorizadas.</p>
-          <form data-form="login">
-            <div class="form-field">
-              <label for="email">Correo electrónico profesional</label>
-              <input id="email" name="email" type="email" required autocomplete="username" placeholder="doctor@tuclinica.com">
+        <div class="login-badge-hang">
+          <div class="login-lanyard" aria-hidden="true">
+            <svg viewBox="0 0 260 440" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="lanyardGrad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#9dc3ab"/>
+                  <stop offset="50%" stop-color="#74a085"/>
+                  <stop offset="100%" stop-color="#537d64"/>
+                </linearGradient>
+                <pattern id="lanyardWeave" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
+                  <line x1="0" y1="0" x2="0" y2="6" stroke="rgba(255,255,255,0.12)" stroke-width="1.5"/>
+                  <line x1="3" y1="0" x2="3" y2="6" stroke="rgba(0,0,0,0.08)" stroke-width="1.5"/>
+                </pattern>
+                <filter id="lanyardShadow" x="-20%" y="-10%" width="140%" height="120%">
+                  <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#04120c" flood-opacity="0.45"/>
+                </filter>
+              </defs>
+              <!-- Cinta trasera curva hacia arriba a la derecha -->
+              <path d="M116 392 C110 270, 152 140, 218 -10 L254 -10 C186 145, 146 272, 148 392 Z" fill="url(#lanyardGrad)" filter="url(#lanyardShadow)"/>
+              <path d="M116 392 C110 270, 152 140, 218 -10 L254 -10 C186 145, 146 272, 148 392 Z" fill="url(#lanyardWeave)"/>
+              <!-- Cinta frontal -->
+              <path d="M108 392 C98 255, 86 125, 58 -10 L96 -10 C122 125, 134 255, 142 392 Z" fill="url(#lanyardGrad)" filter="url(#lanyardShadow)"/>
+              <path d="M108 392 C98 255, 86 125, 58 -10 L96 -10 C122 125, 134 255, 142 392 Z" fill="url(#lanyardWeave)"/>
+              <!-- Doblez en el broche -->
+              <rect x="106" y="382" width="40" height="22" rx="4" fill="#638e74"/>
+              <rect x="106" y="382" width="40" height="22" rx="4" fill="url(#lanyardWeave)"/>
+            </svg>
+          </div>
+          <div class="login-badge-clip" aria-hidden="true">
+            <div class="clip-top-loop"></div>
+            <div class="clip-body">
+              <span class="clip-rivet"></span>
             </div>
-            <div class="form-field">
-              <label for="password">Contraseña</label>
-              <div class="flex" style="gap:6px">
-                <input id="password" name="password" type="password" required autocomplete="current-password" placeholder="Tu contraseña" class="grow">
-                <button type="button" class="icon-btn" data-action="show-password" aria-label="Mostrar contraseña">${icon('eye', 18)}</button>
+          </div>
+          <div class="login-badge-sleeve">
+            <div class="login-badge-slot" aria-hidden="true"></div>
+            <div class="login-card-white">
+              <h2>Acceso al Sistema</h2>
+              <p class="login-desc">Ingresa tus credenciales profesionales autorizadas.</p>
+              <form data-form="login">
+                <div class="form-field">
+                  <label for="email">Correo electrónico profesional</label>
+                  <input id="email" name="email" type="email" required autocomplete="username" placeholder="doctor@tuclinica.com">
+                </div>
+                <div class="form-field">
+                  <label for="password">Contraseña</label>
+                  <div class="flex" style="gap:6px">
+                    <input id="password" name="password" type="password" required autocomplete="current-password" placeholder="Tu contraseña" class="grow">
+                    <button type="button" class="icon-btn" data-action="show-password" aria-label="Mostrar contraseña">${icon('eye', 18)}</button>
+                  </div>
+                </div>
+                <div class="between" style="margin-top: 8px; font-size: 12px;">
+                  <span></span>
+                  <a href="#" data-action="forgot-password" class="text-link" style="color:#235b43">¿Olvidaste tu contraseña?</a>
+                </div>
+                <div class="form-error" role="alert">${esc(error)}</div>
+                <div style="height:15px"></div>
+                <button class="btn-login-submit" type="submit">Ingresar a la clínica ${icon('arrow', 15)}</button>
+              </form>
+              <div style="margin-top:22px;padding-top:16px;border-top:1px solid #e2e8f0;text-align:center;display:flex;flex-direction:column;align-items:center;gap:4px">
+                <span style="font-size:12px;color:#64748b">¿Sos paciente de la clínica?</span>
+                <a href="/portal" data-nav="portal" class="text-link" style="color:#1b4c37;font-weight:700;font-size:13px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap">
+                  ${icon('usercheck', 14)} Ingresar a Mi Portal de Salud →
+                </a>
               </div>
             </div>
-            <div class="between" style="margin-top: 8px; font-size: 12px;">
-              <span></span>
-              <a href="#" data-action="forgot-password" class="text-link" style="color:#235b43">¿Olvidaste tu contraseña?</a>
-            </div>
-            <div class="form-error" role="alert">${esc(error)}</div>
-            <div style="height:15px"></div>
-            <button class="btn-login-submit" type="submit">Ingresar a la clínica ${icon('arrow', 15)}</button>
-          </form>
-          <div style="margin-top:22px;padding-top:16px;border-top:1px solid #e2e8f0;text-align:center;display:flex;flex-direction:column;align-items:center;gap:4px">
-            <span style="font-size:12px;color:#64748b">¿Sos paciente de la clínica?</span>
-            <a href="/portal" data-nav="portal" class="text-link" style="color:#1b4c37;font-weight:700;font-size:13px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap">
-              ${icon('usercheck', 14)} Ingresar a Mi Portal de Salud →
-            </a>
           </div>
         </div>
       </section>
