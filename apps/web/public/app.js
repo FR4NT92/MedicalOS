@@ -1365,11 +1365,26 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     for (const it of items) {
       const invItem = (S.data?.inventory || []).find(x => x.id === it.inventoryId || x.name?.toLowerCase() === (it.name || '').toLowerCase());
       if (invItem) {
-        const nextQty = Math.max(0, Number(invItem.quantity || 0) - (Number(it.quantity) || 1));
+        const deductQty = Number(it.quantity) || 1;
+        const nextQty = Math.max(0, Number(invItem.quantity || 0) - deductQty);
         await fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory?id=eq.${invItem.id}&workspace_id=eq.${currentWorkspaceId}`, {
           method: 'PATCH',
           headers: authHeaders,
           body: JSON.stringify({ quantity: nextQty, updated_at: nowIso })
+        }).catch(() => {});
+        const grp = /medicamento|suero|antisept|f[aá]rmaco/i.test(invItem.category || '') ? 'Fármacos' : 'Insumos';
+        await fetch(`${SUPABASE_CONFIG.url}/rest/v1/audit_logs`, {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify({
+            id: 'audit-' + makeId().slice(0, 8),
+            workspace_id: currentWorkspaceId,
+            actor: S.session?.user?.name || 'Enfermería',
+            action: 'INVENTORY_STOCK_DEDUCTED',
+            entity: 'inventory',
+            entity_id: invItem.id,
+            details: `Se descontó ${deductQty} ${invItem.unit || 'unidades'} al lote número ${invItem.lotNumber || 'S/N'} de ${invItem.name} (${grp} - ${invItem.category || 'General'}). Hospital de Día (${order.resource || 'Sillón'}).`
+          })
         }).catch(() => {});
       }
     }
@@ -1562,6 +1577,77 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     return { ...newInv, patientId: newInv.patient_id, amountCents: newInv.amount_cents, caeVto: caeExp };
   }
 
+  const writeInvAudit = (action, entityId, details) => fetch(`${SUPABASE_CONFIG.url}/rest/v1/audit_logs`, {
+    method: 'POST',
+    headers: authHeaders,
+    body: JSON.stringify({
+      id: 'audit-' + makeId().slice(0, 8),
+      workspace_id: currentWorkspaceId,
+      actor: S.session?.user?.name || 'Personal Clínico',
+      action,
+      entity: 'inventory',
+      entity_id: entityId,
+      details
+    })
+  }).catch(() => {});
+
+  if (path === '/api/inventory/lots' && method === 'POST') {
+    const nowIso = new Date().toISOString();
+    const qty = Math.max(1, parseInt(body.quantity, 10) || 1);
+    const lotNumber = String(body.lotNumber || '').trim();
+    if (!lotNumber) throw Error('Debes indicar el número de lote.');
+    const name = String(body.name || '').trim();
+    if (!name) throw Error('Debes seleccionar o ingresar un producto.');
+    const category = body.category || 'Medicamentos';
+    const groupCat = body.groupCategory || (/medicamento|suero|antisept|f[aá]rmaco/i.test(category) ? 'Fármacos' : 'Insumos');
+    const unit = body.unit || 'unidades';
+    const existing = (S.data?.inventory || []).find(x => (body.existingInventoryId && x.id === body.existingInventoryId) || x.name?.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      const nextQty = Number(existing.quantity || 0) + qty;
+      const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory?id=eq.${existing.id}&workspace_id=eq.${currentWorkspaceId}`, {
+        method: 'PATCH',
+        headers: authHeaders,
+        body: JSON.stringify({
+          quantity: nextQty,
+          lot_number: lotNumber,
+          ...(body.expiryDate ? { expiry_date: body.expiryDate } : {}),
+          ...(body.notes ? { notes: body.notes } : {}),
+          updated_at: nowIso
+        })
+      });
+      if (!res.ok) throw Error('Error al registrar lote en el inventario.');
+      await writeInvAudit('INVENTORY_LOT_CREATED', existing.id, `Se ingresó ${qty} ${existing.unit || unit} al lote número ${lotNumber} de ${existing.name} (${groupCat} - ${existing.category || category}).${body.expiryDate ? ` Vto: ${body.expiryDate}.` : ''}`);
+      return { id: existing.id, quantity: nextQty, lotNumber };
+    }
+    const newItem = {
+      id: 'invt-' + makeId().slice(0, 8),
+      workspace_id: currentWorkspaceId,
+      name,
+      sku: body.sku || `LOT-${Math.floor(1000 + Math.random() * 9000)}`,
+      category,
+      quantity: qty,
+      min_quantity: Math.max(0, parseInt(body.minQuantity, 10) || 5),
+      unit,
+      lot_number: lotNumber,
+      expiry_date: body.expiryDate || '',
+      notes: body.notes || `${groupCat} - ${category}`,
+      status: 'ACTIVE',
+      created_at: nowIso,
+      updated_at: nowIso
+    };
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
+      body: JSON.stringify(newItem)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw Error(err.message || 'Error al crear lote en Supabase.');
+    }
+    await writeInvAudit('INVENTORY_LOT_CREATED', newItem.id, `Se ingresó ${qty} ${unit} al lote número ${lotNumber} de ${name} (${groupCat} - ${category}).${body.expiryDate ? ` Vto: ${body.expiryDate}.` : ''}`);
+    return newItem;
+  }
+
   if (path === '/api/inventory' && method === 'POST') {
     const nowIso = new Date().toISOString();
     const newItem = {
@@ -1589,6 +1675,8 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       const err = await res.json().catch(() => ({}));
       throw Error(err.message || 'Error al registrar insumo.');
     }
+    const grp = /medicamento|suero|antisept|f[aá]rmaco/i.test(newItem.category) ? 'Fármacos' : 'Insumos';
+    await writeInvAudit('INVENTORY_CREATED', newItem.id, `Se dio de alta ${newItem.quantity} ${newItem.unit} de ${newItem.name} (${grp} - ${newItem.category})${newItem.lot_number ? ` · Lote ${newItem.lot_number}` : ''}.`);
     return newItem;
   }
 
@@ -1597,19 +1685,25 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     const id = invStockMatch[1];
     const item = (S.data?.inventory || []).find(x => x.id === id);
     if (!item) throw Error('Insumo no encontrado.');
-    const nextQty = Math.max(0, Number(item.quantity || 0) + Number(body.delta || 0));
+    const delta = Number(body.delta || 0);
+    const nextQty = Math.max(0, Number(item.quantity || 0) + delta);
     const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory?id=eq.${id}&workspace_id=eq.${currentWorkspaceId}`, {
       method: 'PATCH',
       headers: authHeaders,
       body: JSON.stringify({ quantity: nextQty, updated_at: new Date().toISOString() })
     });
     if (!res.ok) throw Error('Error al ajustar stock.');
+    const grp = /medicamento|suero|antisept|f[aá]rmaco/i.test(item.category || '') ? 'Fármacos' : 'Insumos';
+    const actCode = delta < 0 ? 'INVENTORY_STOCK_DEDUCTED' : 'INVENTORY_STOCK_ADJUSTED';
+    const verb = delta < 0 ? `descontó ${Math.abs(delta)}` : `ingresó ${delta}`;
+    await writeInvAudit(actCode, id, `Se ${verb} ${item.unit || 'unidades'} al lote número ${item.lotNumber || 'S/N'} de ${item.name} (${grp} - ${item.category || 'General'}).${body.reason ? ` Motivo: ${body.reason}` : ''}`);
     return { id, quantity: nextQty };
   }
 
   const invItemMatch = path.match(/^\/api\/inventory\/([^/]+)$/);
   if (invItemMatch && method === 'PATCH') {
     const id = invItemMatch[1];
+    const item = (S.data?.inventory || []).find(x => x.id === id);
     const patch = { updated_at: new Date().toISOString() };
     if (body.name) patch.name = body.name;
     if (body.sku !== undefined) patch.sku = body.sku;
@@ -1624,13 +1718,22 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       headers: authHeaders,
       body: JSON.stringify(patch)
     });
+    const cat = body.category || item?.category || 'General';
+    const grp = /medicamento|suero|antisept|f[aá]rmaco/i.test(cat) ? 'Fármacos' : 'Insumos';
+    await writeInvAudit('INVENTORY_UPDATED', id, `Se modificó la ficha de ${body.name || item?.name || 'insumo'} (${grp} - ${cat}).`);
     return { id, ...patch };
   }
   if (invItemMatch && method === 'DELETE') {
-    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory?id=eq.${invItemMatch[1]}&workspace_id=eq.${currentWorkspaceId}`, {
+    const id = invItemMatch[1];
+    const item = (S.data?.inventory || []).find(x => x.id === id);
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory?id=eq.${id}&workspace_id=eq.${currentWorkspaceId}`, {
       method: 'DELETE',
       headers: authHeaders
     });
+    if (item) {
+      const grp = /medicamento|suero|antisept|f[aá]rmaco/i.test(item.category || '') ? 'Fármacos' : 'Insumos';
+      await writeInvAudit('INVENTORY_DELETED', id, `Se eliminó ${item.name} (${grp} - ${item.category || 'General'}) del inventario.`);
+    }
     return { ok: true };
   }
 
@@ -3886,6 +3989,77 @@ function recordsView() {
   </div>`;
 }
 
+const PRELOADED_INVENTORY_CATALOG = [
+  { name: 'Arginina 10%', groupCategory: 'Fármacos', category: 'Medicamentos', unit: 'ampollas' },
+  { name: 'Azul de Metileno 0,5%', groupCategory: 'Fármacos', category: 'Medicamentos', unit: 'frascos' },
+  { name: 'CDP-Colina 5%', groupCategory: 'Fármacos', category: 'Medicamentos', unit: 'ampollas' },
+  { name: 'Complejo B 0,025%', groupCategory: 'Fármacos', category: 'Medicamentos', unit: 'ampollas' },
+  { name: '5OH Triptofano 0,1%', groupCategory: 'Fármacos', category: 'Medicamentos', unit: 'ampollas' },
+  { name: 'EDTA 15%', groupCategory: 'Fármacos', category: 'Medicamentos', unit: 'frascos' },
+  { name: 'Vitamina C Inyectable 10g / 50ml', groupCategory: 'Fármacos', category: 'Sueroterapia', unit: 'frascos' },
+  { name: 'Taurina Inyectable 200mg / 2ml', groupCategory: 'Fármacos', category: 'Sueroterapia', unit: 'ampollas' },
+  { name: 'Glutatión 600mg', groupCategory: 'Fármacos', category: 'Medicamentos', unit: 'frascos' },
+  { name: 'Magnesio Sulfato 25%', groupCategory: 'Fármacos', category: 'Medicamentos', unit: 'ampollas' },
+  { name: 'Nux vomica-Homaccord', groupCategory: 'Fármacos', category: 'Medicamentos', unit: 'ampollas' },
+  { name: 'Mucosa compositum', groupCategory: 'Fármacos', category: 'Medicamentos', unit: 'ampollas' },
+  { name: 'Lymphomyosot', groupCategory: 'Fármacos', category: 'Medicamentos', unit: 'ampollas' },
+  { name: 'Glandula thyreoidea suis-Injeel', groupCategory: 'Fármacos', category: 'Medicamentos', unit: 'ampollas' },
+  { name: 'Agua destilada 500ml', groupCategory: 'Insumos', category: 'Medicamentos', unit: 'frascos' },
+  { name: 'Solución Fisiológica 250ml', groupCategory: 'Insumos', category: 'Materiales', unit: 'frascos' },
+  { name: 'Solución Fisiológica 100ml', groupCategory: 'Insumos', category: 'Materiales', unit: 'frascos' },
+  { name: 'Apósito Transparente 6x7cm', groupCategory: 'Insumos', category: 'Descartables', unit: 'unidades' },
+  { name: 'Catéter endovenoso N 22', groupCategory: 'Insumos', category: 'Descartables', unit: 'unidades' },
+  { name: 'Guía V-14', groupCategory: 'Insumos', category: 'Descartables', unit: 'unidades' }
+];
+
+function getInventoryActionLogs() {
+  const logs = (S.data?.audit || []).filter(a => a.entity === 'inventory' || String(a.action || '').startsWith('INVENTORY_'));
+  const inv = S.data?.inventory || [];
+  return logs.map(a => {
+    const det = String(a.details || '');
+    const item = inv.find(i => i.id === a.entityId);
+    const parenMatch = det.match(/\(([^-()]+)\s*-\s*([^()]+)\)/);
+    const cat = parenMatch ? parenMatch[1].trim() : (/medicamento|suero|antisept|f[aá]rmaco/i.test(item?.category || '') ? 'Fármacos' : 'Insumos');
+    const subcat = parenMatch ? parenMatch[2].trim() : (item?.category || 'General');
+    const prodMatch = det.match(/(?:de|ficha de|eliminó)\s+([^(.]+?)(?:\s*\(|$|\.)/);
+    const product = item?.name || (prodMatch ? prodMatch[1].trim() : 'Insumo');
+
+    let actionLabel = 'Movimiento';
+    let badgeClass = 'gray';
+    if (a.action === 'INVENTORY_STOCK_DEDUCTED' || /descontó/i.test(det)) {
+      actionLabel = 'Descuento de Stock';
+      badgeClass = 'amber';
+    } else if (a.action === 'INVENTORY_LOT_CREATED') {
+      actionLabel = 'Creación de Lote';
+      badgeClass = 'green';
+    } else if (a.action === 'INVENTORY_CREATED') {
+      actionLabel = 'Alta de Insumo';
+      badgeClass = 'green';
+    } else if (a.action === 'INVENTORY_STOCK_ADJUSTED') {
+      actionLabel = 'Ajuste de Stock';
+      badgeClass = 'blue';
+    } else if (a.action === 'INVENTORY_UPDATED') {
+      actionLabel = 'Modificación';
+      badgeClass = 'blue';
+    } else if (a.action === 'INVENTORY_DELETED') {
+      actionLabel = 'Eliminación';
+      badgeClass = 'red';
+    }
+    return {
+      id: a.id,
+      createdAt: a.createdAt,
+      actionCode: a.action,
+      actionLabel,
+      badgeClass,
+      product,
+      category: cat,
+      subcategory: subcat,
+      details: det,
+      actor: a.actor || 'Sistema'
+    };
+  });
+}
+
 function inventoryView() {
   const inv = S.data?.inventory || [];
   const lowStock = inv.filter(i => i.quantity <= i.minQuantity);
@@ -3902,8 +4076,17 @@ function inventoryView() {
     return matchCat && matchSearch;
   });
 
+  const allActionLogs = getInventoryActionLogs();
+  const logSearch = (S.invLogSearch || '').toLowerCase().trim();
+  const logActionFilter = S.invLogAction || 'ALL';
+  const filteredLogs = allActionLogs.filter(l => {
+    const matchAct = logActionFilter === 'ALL' || l.actionLabel === logActionFilter;
+    const matchTxt = !logSearch || [l.actionLabel, l.product, l.category, l.subcategory, l.details, l.actor].some(x => String(x).toLowerCase().includes(logSearch));
+    return matchAct && matchTxt;
+  });
+
   return heading('Inventario de Insumos Médicos', 'Control y gestión en tiempo real de insumos, materiales descartables, instrumental y fármacos.',
-    btn('Nuevo Insumo', 'new-inventory', 'plus', 'primary')
+    btn('Crear Lote', 'new-inventory-lot', 'box') + btn('Nuevo Insumo', 'new-inventory', 'plus', 'primary')
   ) +
   `<div class="stats" style="grid-template-columns:repeat(4,minmax(0,1fr))">
     ${stat('Insumos registrados', inv.length, 'box', 'Catálogo de insumos')}
@@ -3974,6 +4157,60 @@ function inventoryView() {
     <div class="panel-footer">
       <span>Mostrando ${filtered.length} de ${inv.length} insumos</span>
       <span class="flex" style="gap:5px">${lowStock.length > 0 ? `${icon('warning', 12)} ${lowStock.length} artículos requieren reposición` : `${icon('check', 12)} Stock general en niveles operativos`}</span>
+    </div>
+  </section>
+
+  <section class="panel" style="margin-top:22px">
+    <div class="panel-header" style="flex-wrap:wrap;gap:12px">
+      <div>
+        <h2>Registro de acciones</h2>
+        <p class="panel-sub">Historial trazable de ingresos de lotes, descuentos automáticos de stock y movimientos de inventario.</p>
+      </div>
+      <div class="flex" style="flex-wrap:wrap;gap:8px">
+        <div class="search-field" style="min-width:220px">
+          ${icon('search', 14)}
+          <input id="inv-log-search" type="search" placeholder="Buscar en toda la tabla..." value="${esc(S.invLogSearch || '')}" data-input="inv-log-search">
+        </div>
+        <select aria-label="Filtrar por acción" data-change="inv-log-action" style="min-height:36px;border-radius:8px;border:1px solid #dfe6df;padding:0 10px;font-size:12px;background:#fff">
+          <option value="ALL" ${logActionFilter === 'ALL' ? 'selected' : ''}>Todas las acciones</option>
+          <option value="Descuento de Stock" ${logActionFilter === 'Descuento de Stock' ? 'selected' : ''}>Descuento de Stock</option>
+          <option value="Creación de Lote" ${logActionFilter === 'Creación de Lote' ? 'selected' : ''}>Creación de Lote</option>
+          <option value="Alta de Insumo" ${logActionFilter === 'Alta de Insumo' ? 'selected' : ''}>Alta de Insumo</option>
+          <option value="Ajuste de Stock" ${logActionFilter === 'Ajuste de Stock' ? 'selected' : ''}>Ajuste de Stock</option>
+          <option value="Modificación" ${logActionFilter === 'Modificación' ? 'selected' : ''}>Modificación</option>
+          <option value="Eliminación" ${logActionFilter === 'Eliminación' ? 'selected' : ''}>Eliminación</option>
+        </select>
+        <button class="btn small" data-action="export-inv-logs" title="Descargar movimientos en CSV">${icon('download', 13)} Exportar</button>
+        <button class="icon-btn" data-action="refresh-inv-logs" title="Actualizar registro de acciones">${icon('refresh', 14)}</button>
+      </div>
+    </div>
+    ${filteredLogs.length ? `<div class="table-wrap"><table>
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Acción</th>
+          <th>Producto</th>
+          <th>Categoría</th>
+          <th>Subcategoría</th>
+          <th>Detalle</th>
+          <th>Responsable</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${filteredLogs.map(l => `<tr>
+          <td><span class="tiny">${fmtDate(l.createdAt, true)}</span><div class="tiny muted">${fmtTime(l.createdAt)}</div></td>
+          <td><span class="badge ${l.badgeClass}">${esc(l.actionLabel)}</span></td>
+          <td><strong>${esc(l.product)}</strong></td>
+          <td><span class="badge gray">${esc(l.category)}</span></td>
+          <td><span class="tiny muted">${esc(l.subcategory)}</span></td>
+          <td style="white-space:normal;min-width:260px;max-width:420px;font-size:12.5px;color:#334155">${esc(l.details)}</td>
+          <td><span class="tiny">${esc(l.actor)}</span></td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>` : empty('Sin movimientos registrados', 'Los ingresos de lotes, ajustes manuales y descuentos automáticos de Hospital de Día aparecerán aquí.')}
+    <div class="panel-footer">
+      <span>${filteredLogs.length} movimiento(s) visible(s)</span>
+      <span>Auditoría inmutable de stock e insumos</span>
     </div>
   </section>`;
 }
@@ -6062,6 +6299,105 @@ function adjustStockDialog(id) {
   if (form) form.dataset.id = id;
 }
 
+function createLotDialog() {
+  const existingInv = S.data?.inventory || [];
+  const merged = [];
+  const seen = new Set();
+  for (const item of existingInv) {
+    const k = item.name.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const grp = /medicamento|suero|antisept|f[aá]rmaco/i.test(item.category || '') ? 'Fármacos' : 'Insumos';
+    merged.push({
+      existingInventoryId: item.id,
+      name: item.name,
+      groupCategory: grp,
+      category: item.category || 'Descartables',
+      unit: item.unit || 'unidades',
+      currentQty: item.quantity ?? 0
+    });
+  }
+  for (const pre of PRELOADED_INVENTORY_CATALOG) {
+    const k = pre.name.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    merged.push({
+      existingInventoryId: '',
+      name: pre.name,
+      groupCategory: pre.groupCategory,
+      category: pre.category,
+      unit: pre.unit,
+      currentQty: null
+    });
+  }
+
+  const first = merged[0] || { existingInventoryId: '', name: '', groupCategory: 'Fármacos', category: 'Medicamentos', unit: 'unidades' };
+
+  formDialog('inventory-lot', 'Crear Lote de Producto / Insumo', 'Selecciona un producto del catálogo o busca uno existente para ingresar un nuevo lote con trazabilidad.',
+    `<div class="form-field full" style="position:relative">
+      <label for="lot-product-search">Producto * (Busque o seleccione del catálogo)</label>
+      <div class="search-field" style="width:100%;margin-bottom:6px">
+        ${icon('search', 14)}
+        <input id="lot-product-search" type="search" autocomplete="off" placeholder="Busque un producto..." value="${esc(first.name)}">
+      </div>
+      <div id="lot-product-list" style="max-height:190px;overflow-y:auto;border:1px solid #dce6dd;border-radius:10px;background:#ffffff;padding:4px">
+        ${merged.map((m, idx) => `
+          <button type="button" class="lot-product-opt" data-idx="${idx}" style="width:100%;text-align:left;padding:8px 12px;border-radius:7px;background:${idx === 0 ? '#eef6f0' : 'transparent'};color:#182d27;font-size:12.5px;display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:2px">
+            <span><strong>${esc(m.name)}</strong> <span class="muted">(${esc(m.groupCategory)} - ${esc(m.category)})</span></span>
+            ${m.currentQty !== null ? `<span class="badge green" style="font-size:10px">En stock: ${m.currentQty}</span>` : `<span class="badge gray" style="font-size:10px">Catálogo</span>`}
+          </button>
+        `).join('')}
+      </div>
+      <input type="hidden" name="existingInventoryId" id="lot-existing-id" value="${esc(first.existingInventoryId)}">
+      <input type="hidden" name="name" id="lot-name" value="${esc(first.name)}">
+      <input type="hidden" name="groupCategory" id="lot-group" value="${esc(first.groupCategory)}">
+      <input type="hidden" name="category" id="lot-category" value="${esc(first.category)}">
+      <input type="hidden" name="unit" id="lot-unit" value="${esc(first.unit)}">
+    </div>` +
+    field('Número de Lote *', 'lotNumber', 'text', '', 'required maxlength="60" placeholder="Ej. 20261120"') +
+    field('Cantidad a ingresar *', 'quantity', 'number', 10, 'required min="1" step="1"') +
+    field('Fecha de vencimiento *', 'expiryDate', 'date', '', 'required') +
+    field('Stock mínimo de alerta', 'minQuantity', 'number', 5, 'min="0" step="1"') +
+    area('Observaciones / Proveedor', 'notes', '', 'maxlength="500" placeholder="Ej. Droguería del Sud · Ingreso por lote"', true),
+    'Registrar Lote', '', 'wide'
+  );
+
+  setTimeout(() => {
+    const searchEl = $('#lot-product-search');
+    const listEl = $('#lot-product-list');
+    const selectItem = (m, idx) => {
+      $('#lot-existing-id').value = m.existingInventoryId || '';
+      $('#lot-name').value = m.name;
+      $('#lot-group').value = m.groupCategory;
+      $('#lot-category').value = m.category;
+      $('#lot-unit').value = m.unit;
+      if (searchEl) searchEl.value = m.name;
+      listEl?.querySelectorAll('.lot-product-opt').forEach(btn => {
+        btn.style.background = Number(btn.dataset.idx) === idx ? '#eef6f0' : 'transparent';
+      });
+    };
+
+    listEl?.addEventListener('click', e => {
+      const opt = e.target.closest('.lot-product-opt');
+      if (!opt) return;
+      const idx = Number(opt.dataset.idx);
+      if (merged[idx]) selectItem(merged[idx], idx);
+    });
+
+    searchEl?.addEventListener('input', e => {
+      const q = (e.target.value || '').toLowerCase().trim();
+      $('#lot-name').value = e.target.value.trim();
+      $('#lot-existing-id').value = '';
+      listEl?.querySelectorAll('.lot-product-opt').forEach(opt => {
+        const idx = Number(opt.dataset.idx);
+        const m = merged[idx];
+        const match = !q || m.name.toLowerCase().includes(q) || m.category.toLowerCase().includes(q) || m.groupCategory.toLowerCase().includes(q);
+        opt.style.display = match ? 'flex' : 'none';
+      });
+    });
+  }, 50);
+}
+
 function prescriptionForm() {
   formDialog('prescription', 'Emitir Receta Médica', 'Prescripción de medicamentos e indicaciones para farmacia.',
     patientSelect() +
@@ -6544,7 +6880,26 @@ document.addEventListener('click', async e => {
         }
         break;
       }
+      case 'new-inventory-lot': createLotDialog(); break;
       case 'new-inventory': inventoryForm(); break;
+      case 'refresh-inv-logs':
+        await refresh();
+        contentOnly();
+        toast('Registro de acciones actualizado.');
+        break;
+      case 'export-inv-logs': {
+        const rows = getInventoryActionLogs();
+        const csv = [['Fecha', 'Accion', 'Producto', 'Categoria', 'Subcategoria', 'Detalle', 'Responsable'],
+          ...rows.map(r => [r.createdAt, r.actionLabel, r.product, r.category, r.subcategory, r.details, r.actor])
+        ].map(row => row.map(c => `"${String(c || '').replace(/"/g, '""')}"`).join(';')).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `registro-acciones-inventario-${dateKey()}.csv`;
+        a.click();
+        toast('Registro de acciones exportado en CSV.');
+        break;
+      }
       case 'edit-inventory': inventoryForm(id); break;
       case 'adjust-stock': adjustStockDialog(id); break;
       case 'inventory-cat': S.inventoryCategory = el.dataset.value; contentOnly(); break;
@@ -6969,6 +7324,22 @@ document.addEventListener('submit', async e => {
         message = 'Factura oficial autorizada por ARCA con CAE emitida exitosamente.';
         break;
       }
+      case 'inventory-lot':
+        await api('/api/inventory/lots', 'POST', {
+          existingInventoryId: b.existingInventoryId || '',
+          name: b.name,
+          groupCategory: b.groupCategory,
+          category: b.category,
+          unit: b.unit,
+          lotNumber: b.lotNumber,
+          quantity: Number(b.quantity),
+          expiryDate: b.expiryDate,
+          minQuantity: Number(b.minQuantity),
+          notes: b.notes || ''
+        });
+        message = `Lote ${b.lotNumber} de "${b.name}" registrado en el inventario.`;
+        S.view = 'inventory';
+        break;
       case 'inventory':
         if (form.dataset.id) {
           await api('/api/inventory/' + form.dataset.id, 'PATCH', b);
@@ -7146,6 +7517,16 @@ document.addEventListener('input', e => {
       input.setSelectionRange(start, start);
     }
   }
+  if (e.target.dataset.input === 'inv-log-search') {
+    const value = e.target.value, start = e.target.selectionStart;
+    S.invLogSearch = value;
+    contentOnly();
+    const input = $('#inv-log-search');
+    if (input) {
+      input.focus();
+      input.setSelectionRange(start, start);
+    }
+  }
   if (e.target.dataset.action === 'omni-search') {
     const value = e.target.value, start = e.target.selectionStart;
     S.omniSearch = value;
@@ -7174,6 +7555,7 @@ document.addEventListener('change', async e => {
   try {
     if (key === 'patient-status') { S.patientStatus = el.value; contentOnly(); }
     if (key === 'staff-role') { S.staffRole = el.value; contentOnly(); }
+    if (key === 'inv-log-action') { S.invLogAction = el.value; contentOnly(); }
     if (key === 'date') { if (el.value) S.date = el.value; contentOnly(); }
     if (key === 'doctor') { S.doctor = el.value; contentOnly(); }
     if (key === 'agenda') { S.selectedAgenda = el.value; contentOnly(); }

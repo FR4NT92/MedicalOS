@@ -2171,6 +2171,50 @@ async function handle(req, res) {
     // ==========================================
     // INVENTARIO Y GESTIÓN DE INSUMOS CLÍNICOS
     // ==========================================
+    if (path === '/api/inventory/lots' && method === 'POST') {
+      const b = await body(req);
+      const qty = Math.max(1, parseInt(b.quantity, 10) || 1);
+      const lotNumber = text(b.lotNumber, 'Número de lote', 1, 60);
+      const name = text(b.name, 'Producto', 1, 150);
+      const category = text(b.category || 'Medicamentos', 'Categoría', 1, 100);
+      const groupCat = b.groupCategory || (/medicamento|suero|antisept|f[aá]rmaco/i.test(category) ? 'Fármacos' : 'Insumos');
+      const unit = text(b.unit || 'unidades', 'Unidad', 1, 50);
+      const existing = b.existingInventoryId
+        ? q('SELECT * FROM inventory WHERE workspaceId=? AND id=?', w, b.existingInventoryId)
+        : q('SELECT * FROM inventory WHERE workspaceId=? AND LOWER(name)=LOWER(?)', w, name);
+
+      if (existing) {
+        const nextQty = Number(existing.quantity || 0) + qty;
+        transaction(() => {
+          run('UPDATE inventory SET quantity=?, lotNumber=?, expiryDate=?, notes=?, updatedAt=? WHERE workspaceId=? AND id=?',
+            nextQty, lotNumber, optional(b.expiryDate, 'Vencimiento', 20) || existing.expiryDate || '', optional(b.notes, 'Notas', 500) || existing.notes || '', now(), w, existing.id);
+          audit(u, 'INVENTORY_LOT_CREATED', 'inventory', existing.id, `Se ingresó ${qty} ${existing.unit || unit} al lote número ${lotNumber} de ${existing.name} (${groupCat} - ${existing.category || category}).`);
+        });
+        return json(res, 200, { id: existing.id, quantity: nextQty, lotNumber });
+      }
+      const item = {
+        id: uid(),
+        workspaceId: w,
+        name,
+        sku: optional(b.sku, 'SKU', 50) || `LOT-${Math.floor(1000 + Math.random() * 9000)}`,
+        category,
+        quantity: qty,
+        minQuantity: Math.max(0, parseInt(b.minQuantity, 10) || 5),
+        unit,
+        lotNumber,
+        expiryDate: optional(b.expiryDate, 'Vencimiento', 20),
+        notes: optional(b.notes, 'Notas', 500) || `${groupCat} - ${category}`,
+        status: 'ACTIVE',
+        createdAt: now(),
+        updatedAt: now()
+      };
+      transaction(() => {
+        put('inventory', item);
+        audit(u, 'INVENTORY_LOT_CREATED', 'inventory', item.id, `Se ingresó ${qty} ${unit} al lote número ${lotNumber} de ${name} (${groupCat} - ${category}).`);
+      });
+      return json(res, 201, item);
+    }
+
     if (path === '/api/inventory' && method === 'POST') {
       const b = await body(req);
       const item = {

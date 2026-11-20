@@ -242,6 +242,25 @@ async function handler(path,method='GET',b={},headers={}){
    persist();
    return clone(it);
   }
+  if(path==='/api/inventory/lots'&&method==='POST'){
+   if(!state.inventory)state.inventory=[];
+   const qty=Math.max(1,parseInt(b.quantity,10)||1);
+   const lot=text(b.lotNumber,'Lote',1,60);
+   const name=text(b.name,'Producto',1,150);
+   const cat=b.category||'Medicamentos';
+   const grp=b.groupCategory||(/medicamento|suero|antisept|f[aá]rmaco/i.test(cat)?'Fármacos':'Insumos');
+   const unit=b.unit||'unidades';
+   const existing=state.inventory.find(x=>(b.existingInventoryId&&x.id===b.existingInventoryId)||x.name.toLowerCase()===name.toLowerCase());
+   if(existing){
+     existing.quantity+=qty;existing.lotNumber=lot;if(b.expiryDate)existing.expiryDate=b.expiryDate;
+     audit('INVENTORY_LOT_CREATED','inventory',existing.id,`Se ingresó ${qty} ${existing.unit||unit} al lote número ${lot} de ${existing.name} (${grp} - ${existing.category}).`);
+     persist();return clone(existing);
+   }
+   const item={id:uid(),workspaceId:'clinic-demo',name,sku:`LOT-${Math.floor(1000+Math.random()*9000)}`,category:cat,quantity:qty,minQuantity:Math.max(0,parseInt(b.minQuantity,10)||5),unit,lotNumber:lot,expiryDate:b.expiryDate||'',notes:b.notes||'',status:'ACTIVE',createdAt:now(),updatedAt:now()};
+   state.inventory.unshift(item);
+   audit('INVENTORY_LOT_CREATED','inventory',item.id,`Se ingresó ${qty} ${unit} al lote número ${lot} de ${name} (${grp} - ${cat}).`);
+   persist();return clone(item);
+  }
   if(path==='/api/quotes'&&method==='POST'){
    needPatient(b.patientId);
    if(!state.quotes)state.quotes=[];

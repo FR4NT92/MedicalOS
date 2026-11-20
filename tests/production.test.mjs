@@ -111,7 +111,7 @@ describe('Abundance Clinic OS - Validación Integral de Software Productivo', ()
     const apptData = {
       patientId: 'patient-1',
       doctorId: 'doctor-1',
-      startAt: '2026-11-20T10:00:00-03:00',
+      startAt: '2027-03-15T10:00:00-03:00',
       duration: 30,
       type: 'CONSULTATION',
       status: 'CONFIRMED',
