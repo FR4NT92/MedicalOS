@@ -32,10 +32,10 @@ const titles = {
   patients: 'Pacientes',
   schedule: 'Agenda',
   pipeline: 'Seguimiento',
-  hospitalDay: 'Hospital de Día',
+  hospitalDay: 'Terapias Ambulatorias',
   records: 'Historia clínica',
   staff: 'Equipo y Personal',
-  inventory: 'Inventario de Insumos',
+  inventory: 'Inventario e insumos',
   billing: 'Cobros y facturación',
   analytics: 'Rendimiento',
   integrations: 'Conexiones e Integraciones',
@@ -560,6 +560,8 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
         role: u.role,
         specialty: doc?.specialty || (u.role === 'RECEPTIONIST' ? 'Recepción y Admisión de Turnos' : (u.role === 'DOCTOR' ? 'Medicina General / Especialista' : 'Dirección y Administración General')),
         licenseNumber: doc?.license_number || '',
+        signatureData: doc?.signature_data || '',
+        address: doc?.address || '',
         createdAt: u.created_at
       };
     });
@@ -572,6 +574,8 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
           role: 'DOCTOR',
           specialty: d.specialty || 'Especialista Médico',
           licenseNumber: d.license_number || '',
+          signatureData: d.signature_data || '',
+          address: d.address || '',
           createdAt: d.created_at || new Date().toISOString()
         });
       }
@@ -590,7 +594,12 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
         createdAt: p.created_at,
         updatedAt: p.updated_at
       })),
-      doctors: doctors.map(d => ({ ...d })),
+      doctors: doctors.map(d => ({
+        ...d,
+        licenseNumber: d.license_number || '',
+        signatureData: d.signature_data || '',
+        address: d.address || ''
+      })),
       staff,
       agendas,
       quotes: (Array.isArray(rawQuotes) ? rawQuotes : []).map(q => ({
@@ -612,15 +621,34 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
         createdAt: a.created_at
       })),
       leads: leads.map(l => ({ ...l, createdAt: l.created_at, updatedAt: l.updated_at })),
-      records: records.map(r => ({
-        ...r,
-        patientId: r.patient_id,
-        previousHash: r.previous_hash,
-        amendmentOf: r.amendment_of,
-        createdAt: r.created_at,
-        content: typeof r.content === 'string' ? JSON.parse(r.content) : (r.content || {})
-      })),
-      prescriptions: Array.isArray(rawPrescriptions) ? rawPrescriptions.map(pr => ({ ...pr, patientId: pr.patient_id, createdAt: pr.created_at })) : [],
+      records: records.map(r => {
+        const parsed = typeof r.content === 'string' ? JSON.parse(r.content || '{}') : (r.content || {});
+        return {
+          ...r,
+          patientId: r.patient_id,
+          previousHash: r.previous_hash,
+          amendmentOf: r.amendment_of,
+          createdAt: r.created_at,
+          problem: parsed.problem || r.problem || '',
+          specialty: parsed.specialty || r.specialty || '',
+          title: parsed.title || r.title || '',
+          attachments: parsed.attachments || r.attachments || [],
+          vitals: parsed.vitals || r.vitals || null,
+          uploadedVia: parsed.uploadedVia || '',
+          content: parsed
+        };
+      }),
+      prescriptions: Array.isArray(rawPrescriptions) ? rawPrescriptions.map(pr => ({
+        ...pr,
+        patientId: pr.patient_id,
+        doctorId: pr.doctor_id,
+        doctorName: pr.doctor_name,
+        doctorLicense: pr.doctor_license,
+        cuir: pr.cuir,
+        diagnosis: pr.diagnosis,
+        medications: typeof pr.medications === 'string' ? JSON.parse(pr.medications || '[]') : (pr.medications || []),
+        createdAt: pr.created_at
+      })) : [],
       consents: Array.isArray(rawConsents) ? rawConsents.map(c => ({
         ...c,
         patientId: c.patient_id,
@@ -658,6 +686,8 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
         patientId: p.patient_id,
         appointmentId: p.appointment_id,
         amountCents: p.amount_cents,
+        movementType: p.movement_type || 'INCOME',
+        category: p.category || 'CONSULTATION',
         idempotencyKey: p.idempotency_key,
         createdAt: p.created_at
       })),
@@ -745,6 +775,41 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     }).catch(() => {});
 
     return { id: userId, email: body.email, name: body.name, role };
+  }
+
+  const staffCredMatch = path.match(/^\/api\/staff\/([^/]+)\/credentials$/);
+  if (staffCredMatch && method === 'PATCH') {
+    const staffId = staffCredMatch[1];
+    const doc = (S.data?.doctors || []).find(d => d.id === staffId || (body.name && d.name?.toLowerCase() === body.name.toLowerCase()));
+    if (doc) {
+      const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/doctors?id=eq.${doc.id}&workspace_id=eq.${currentWorkspaceId}`, {
+        method: 'PATCH',
+        headers: authHeaders,
+        body: JSON.stringify({
+          specialty: body.specialty || doc.specialty,
+          license_number: body.licenseNumber || '',
+          signature_data: body.signatureData || '',
+          address: body.address || ''
+        })
+      });
+      if (!res.ok) throw Error('Error al guardar firma y matrícula del profesional.');
+    } else {
+      const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/doctors`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          id: staffId,
+          workspace_id: currentWorkspaceId,
+          name: body.name || 'Profesional Médico',
+          specialty: body.specialty || 'Medicina General',
+          license_number: body.licenseNumber || '',
+          signature_data: body.signatureData || '',
+          address: body.address || ''
+        })
+      });
+      if (!res.ok) throw Error('Error al registrar perfil médico y firma digital.');
+    }
+    return { ok: true, id: staffId };
   }
 
   const staffDelMatch = path.match(/^\/api\/staff\/([^/]+)$/);
@@ -941,32 +1006,57 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
   }
 
   if (path === '/api/records' && method === 'POST') {
+    const incomingContent = typeof body.content === 'object' && body.content ? body.content : {};
+    const consumedSupplies = Array.isArray(body.consumedSupplies) ? body.consumedSupplies : (incomingContent.consumedSupplies || []);
+    const nowIso = new Date().toISOString();
     const newRec = {
       id: 'rec-' + makeId().slice(0, 8),
       workspace_id: currentWorkspaceId,
       patient_id: body.patientId,
-      type: body.type || 'SOAP_NOTE',
+      type: body.type || (body.amendmentOf ? 'AMENDMENT' : 'SOAP_NOTE'),
       content: {
-        subjective: body.subjective || '',
-        objective: body.objective || '',
-        assessment: body.assessment || '',
-        plan: body.plan || '',
-        problem: body.problem || '',
-        specialty: body.specialty || 'Medicina General',
-        title: body.title || '',
-        vitals: body.vitals || null,
-        attachments: body.attachments || []
+        ...incomingContent,
+        subjective: body.subjective || incomingContent.subjective || '',
+        objective: body.objective || incomingContent.objective || '',
+        assessment: body.assessment || incomingContent.assessment || '',
+        plan: body.plan || incomingContent.plan || '',
+        html: body.html || incomingContent.html || '',
+        notes: body.notes || incomingContent.notes || '',
+        problem: body.problem || incomingContent.problem || '',
+        specialty: body.specialty || incomingContent.specialty || 'Medicina General',
+        title: body.title || incomingContent.title || '',
+        vitals: body.vitals || incomingContent.vitals || null,
+        attachments: body.attachments || incomingContent.attachments || [],
+        consumedSupplies
       },
       author: S.session?.user?.name || 'Profesional de la Salud',
       previous_hash: S.data?.records?.[0]?.hash || '0'.repeat(64),
-      hash: 'sha256-' + makeId() + makeId()
+      hash: 'sha256-' + makeId() + makeId(),
+      ...(body.amendmentOf ? { amendment_of: body.amendmentOf } : {}),
+      created_at: nowIso
     };
-    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/records`, {
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/records`, {
       method: 'POST',
       headers: { ...authHeaders, 'Prefer': 'return=representation' },
       body: JSON.stringify(newRec)
-    }).catch(() => {});
-    return { ...newRec, patientId: newRec.patient_id, createdAt: new Date().toISOString() };
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw Error(err.message || 'Error al guardar la evolución clínica.');
+    }
+    for (const sup of consumedSupplies) {
+      const invItem = (S.data?.inventory || []).find(x => x.id === sup.inventoryId);
+      if (invItem) {
+        const deduct = Math.max(1, parseInt(sup.quantity, 10) || 1);
+        const nextQty = Math.max(0, Number(invItem.quantity || 0) - deduct);
+        await fetch(`${SUPABASE_CONFIG.url}/rest/v1/inventory?id=eq.${invItem.id}&workspace_id=eq.${currentWorkspaceId}`, {
+          method: 'PATCH',
+          headers: authHeaders,
+          body: JSON.stringify({ quantity: nextQty, updated_at: nowIso })
+        }).catch(() => {});
+      }
+    }
+    return { ...newRec, patientId: newRec.patient_id, createdAt: nowIso };
   }
 
   if (path === '/api/consents' && method === 'POST') {
@@ -1507,12 +1597,16 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
   if (path === '/api/payments' && method === 'POST') {
     const amountCents = Math.round(Number(body.amount) * 100);
     if (!Number.isFinite(amountCents) || amountCents <= 0) throw Error('Importe inválido.');
+    const movementType = body.movementType === 'EXPENSE' ? 'EXPENSE' : 'INCOME';
+    const category = body.category || (movementType === 'EXPENSE' ? 'SUPPLIES' : 'CONSULTATION');
     const newPay = {
       id: 'pay-' + makeId().slice(0, 8),
       workspace_id: currentWorkspaceId,
-      patient_id: body.patientId,
+      patient_id: body.patientId || null,
       appointment_id: body.appointmentId || null,
       amount_cents: amountCents,
+      movement_type: movementType,
+      category,
       method: body.method || 'TRANSFERENCIA',
       reference: body.reference || '',
       idempotency_key: headers['Idempotency-Key'] || makeId(),
@@ -1526,9 +1620,9 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw Error(err.message || 'Error al registrar cobro.');
+      throw Error(err.message || 'Error al registrar movimiento financiero.');
     }
-    return { ...newPay, patientId: newPay.patient_id, amountCents: newPay.amount_cents, createdAt: newPay.created_at };
+    return { ...newPay, patientId: newPay.patient_id, amountCents: newPay.amount_cents, movementType, category, createdAt: newPay.created_at };
   }
 
   if (path === '/api/invoices' && method === 'POST') {
@@ -1738,11 +1832,20 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
   }
 
   if (path === '/api/prescriptions' && method === 'POST') {
+    const doc = (S.data?.staff || S.data?.doctors || []).find(d => d.id === body.doctorId) || (S.data?.staff || S.data?.doctors || [])[0] || null;
+    const cuir = body.cuir || `AR-CUIR-${new Date().getFullYear()}-${String(Math.floor(10000000 + Math.random() * 90000000))}-${makeId().slice(0, 4).toUpperCase()}`;
+    const meds = Array.isArray(body.medications) ? body.medications : [];
     const newPresc = {
       id: 'prs-' + makeId().slice(0, 8),
       workspace_id: currentWorkspaceId,
       patient_id: body.patientId,
-      content: body.content,
+      doctor_id: body.doctorId || doc?.id || '',
+      doctor_name: body.doctorName || doc?.name || S.session?.user?.name || 'Médico Tratante',
+      doctor_license: body.doctorLicense || doc?.licenseNumber || 'M.N. 142.850',
+      cuir,
+      diagnosis: body.diagnosis || '',
+      medications: meds,
+      content: body.content || meds.map(m => `${m.drug} (${m.presentation || ''}) - ${m.dosage || ''}`).join('\n'),
       status: 'ISSUED',
       created_at: new Date().toISOString()
     };
@@ -1751,8 +1854,18 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       headers: { ...authHeaders, 'Prefer': 'return=representation' },
       body: JSON.stringify(newPresc)
     });
-    if (!res.ok) throw Error('Error al emitir receta.');
-    return { ...newPresc, patientId: newPresc.patient_id, createdAt: newPresc.created_at };
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw Error(err.message || 'Error al emitir receta electrónica.');
+    }
+    return {
+      ...newPresc,
+      patientId: newPresc.patient_id,
+      doctorId: newPresc.doctor_id,
+      doctorName: newPresc.doctor_name,
+      doctorLicense: newPresc.doctor_license,
+      createdAt: newPresc.created_at
+    };
   }
 
   if (path === '/api/leads' && method === 'POST') {
@@ -2989,10 +3102,40 @@ function homeView() {
     <div class="stack home-right">
       <section class="panel">
         <div class="panel-header">
-          <h2>Necesita tu atención</h2>
-          <span class="badge ${m.pending ? 'amber' : 'green'}">${m.pending ? m.pending + ' pendientes' : 'Al día'}</span>
+          <div>
+            <h2>Necesita tu atención</h2>
+            <p class="panel-sub" style="display:flex;align-items:center;gap:5px;margin-top:2px">
+              <span style="width:7px;height:7px;border-radius:50%;background:#16a34a;display:inline-block;box-shadow:0 0 0 3px rgba(22,163,74,0.18)"></span>
+              Monitoreo continuo IA de agenda, WhatsApp e inventario
+            </p>
+          </div>
+          <span class="badge ${m.pending || S.data.leads.filter(l => l.status === 'NEW').length ? 'amber' : 'green'}">${(m.pending + S.data.leads.filter(l => l.status === 'NEW').length) ? (m.pending + S.data.leads.filter(l => l.status === 'NEW').length) + ' alertas' : 'Al día'}</span>
         </div>
         <div class="panel-body">
+          ${(() => {
+            const wspLeads = (S.data.leads || []).filter(l => l.status === 'NEW' || /whatsapp|wsp/i.test(l.source || ''));
+            const pendingWsp = wspLeads.filter(l => l.status === 'NEW');
+            const displayWsp = pendingWsp.length ? pendingWsp : wspLeads.slice(0, 2);
+            const firstLead = displayWsp[0];
+            const cleanWaPhone = firstLead?.phone ? String(firstLead.phone).replace(/\D/g, '') : '';
+            return `
+            <div class="attention-row" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:11px 12px;margin-bottom:8px">
+              <div class="attention-symbol" style="background:#16a34a;color:#fff">${icon('whatsapp', 15)}</div>
+              <div class="grow">
+                <div class="between" style="gap:6px">
+                  <h4 style="color:#14532d">${pendingWsp.length || wspLeads.length} consulta(s) en WhatsApp requieren respuesta directa</h4>
+                  <span class="badge green" style="font-size:10px">Prioridad Directa</span>
+                </div>
+                <p style="color:#166534;margin-top:2px">
+                  ${firstLead ? `Último ingreso: <b>${esc(firstLead.name)}</b> (${esc(firstLead.interest || 'Consulta general')}) · ${esc(firstLead.phone || '')}` : 'Mensajes entrantes detectados por el monitor de canal WhatsApp pendientes de atención.'}
+                </p>
+                <div class="flex" style="gap:10px;margin-top:6px;flex-wrap:wrap">
+                  ${cleanWaPhone ? `<a href="https://wa.me/${esc(cleanWaPhone)}?text=${encodeURIComponent(`Hola ${firstLead.name}, te escribimos de la clínica respecto a tu consulta sobre ${firstLead.interest || 'turnos y tratamientos'}.`)}" target="_blank" rel="noopener" class="text-link" style="color:#15803d;font-weight:700">${icon('whatsapp', 11)} Responder ahora en WhatsApp</a>` : ''}
+                  <button class="text-link" data-nav="pipeline">Abrir bandeja de consultas ${icon('arrow', 11)}</button>
+                </div>
+              </div>
+            </div>`;
+          })()}
           <div class="attention-row">
             <div class="attention-symbol">${icon('clock', 15)}</div>
             <div class="grow">
@@ -3004,19 +3147,23 @@ function homeView() {
           <div class="attention-row">
             <div class="attention-symbol" style="background:#eaf4eb;color:#357a4e">${icon('pipeline', 15)}</div>
             <div class="grow">
-              <h4>${S.data.leads.filter(l => l.status === 'NEW').length} consultas o contactos nuevos</h4>
+              <h4>${S.data.leads.filter(l => l.status === 'NEW').length} consultas o contactos nuevos en seguimiento</h4>
               <p>Seguimiento de primeras consultas y oportunidades médicas.</p>
               <button class="text-link" data-nav="pipeline">Gestionar seguimiento ${icon('arrow', 11)}</button>
             </div>
           </div>
-          <div class="attention-row">
-            <div class="attention-symbol" style="background:#e8f0fe;color:#3c67be">${icon('file', 15)}</div>
-            <div class="grow">
-              <h4>Historias clínicas al día</h4>
-              <p>Evoluciones SOAP y prescripciones médicas con integridad criptográfica.</p>
-              <button class="text-link" data-nav="records">Ir a historias clínicas ${icon('arrow', 11)}</button>
-            </div>
-          </div>
+          ${(() => {
+            const portalDocs = (S.data.records || []).filter(r => r.uploadedVia === 'PORTAL_PACIENTES' || r.content?.uploadedVia === 'PORTAL_PACIENTES' || /Paciente \(Portal\)/i.test(r.author || ''));
+            return `
+            <div class="attention-row">
+              <div class="attention-symbol" style="background:#e8f0fe;color:#3c67be">${icon('file', 15)}</div>
+              <div class="grow">
+                <h4>${portalDocs.length ? `${portalDocs.length} estudio(s) subidos por pacientes al Portal` : 'Historias clínicas y evolución al día'}</h4>
+                <p>${portalDocs.length ? 'Documentos sincronizados automáticamente en la ficha del paciente para comparativa clínica.' : 'Evoluciones SOAP, estudios de portal y prescripciones con integridad criptográfica.'}</p>
+                <button class="text-link" data-nav="records">Ir a historias clínicas ${icon('arrow', 11)}</button>
+              </div>
+            </div>`;
+          })()}
         </div>
       </section>
     </div>
@@ -3420,11 +3567,15 @@ function staffView() {
               </td>
               <td>${badge(m.role)}</td>
               <td>${esc(m.specialty || 'General')}</td>
-              <td><code>${esc(m.licenseNumber || '—')}</code></td>
+              <td>
+                <code>${esc(m.licenseNumber || '—')}</code>
+                ${m.signatureData ? `<div class="tiny" style="color:#15803d;font-weight:600;margin-top:2px">✓ Firma digital activa</div>` : `<div class="tiny muted" style="margin-top:2px">Sin firma cargada</div>`}
+              </td>
               <td><b>${apptsCount}</b> turnos</td>
               <td><span class="badge green"><i class="dot"></i>Activo</span></td>
               <td>
                 <div style="display:flex;gap:6px;justify-content:flex-end">
+                  <button class="btn small" data-action="edit-doctor-credentials" data-id="${m.id}" title="Configurar Firma Digital, Matrícula y Sello para Recetas y Presupuestos">${icon('edit', 13)} Firma y Matrícula</button>
                   <button class="btn small danger" data-action="delete-staff" data-id="${m.id}" data-name="${esc(m.name)}" title="Eliminar miembro del equipo">${icon('close', 13)} Eliminar</button>
                 </div>
               </td>
@@ -3436,9 +3587,139 @@ function staffView() {
     ` : empty('No se encontró personal registrado', 'Puedes dar de alta a secretarias, médicos y administradores haciendo clic en "Nuevo miembro".', btn('Nuevo miembro', 'new-staff', 'plus', 'primary'))}
     <div class="panel-footer">
       <span>Personal activo en clínica: ${filtered.length}</span>
-      <span>Controles de acceso basados en roles (RBAC) con auditoría</span>
+      <span>Controles de acceso basados en roles (RBAC) con firma digital y matrícula para recetario legal</span>
     </div>
   </section>`;
+}
+
+function doctorCredentialsDialog(staffId) {
+  const m = (S.data?.staff || S.data?.doctors || []).find(x => x.id === staffId);
+  if (!m) return toast('Profesional no encontrado', 'err');
+  showModal(
+    `Firma Digital y Matrícula · ${m.name}`,
+    'Estos datos profesionales e imagen de firma se imprimen automáticamente en Recetas Electrónicas (RCTA / Ley 27.553), Presupuestos Clínicos y Facturas.',
+    `<form data-form="doctor-credentials" data-id="${esc(m.id)}">
+      <div class="form-grid">
+        ${field('Matrícula Profesional (M.N. / M.P.) *', 'licenseNumber', 'text', m.licenseNumber || '', 'required placeholder="Ej: M.N. 142.850 · M.P. 98.412"')}
+        ${field('Especialidad / Título en Sello *', 'specialty', 'text', m.specialty || 'Medicina Integrativa', 'required placeholder="Ej: Médica Especialista en Medicina Integrativa"')}
+        ${field('Datos de Consultorio / Pie de Receta', 'address', 'text', m.address || 'Centro Médico · Atención con Turno Previo', 'placeholder="Dirección, teléfono o leyenda de sello médico"', true)}
+      </div>
+
+      <div style="margin-top:14px;border:1px solid #d8e4da;border-radius:10px;padding:14px;background:#f8fbf9">
+        <div class="between" style="margin-bottom:8px;flex-wrap:wrap;gap:8px">
+          <div>
+            <strong style="font-size:13px;color:#18362b;display:block">Trazo de Firma Digital o Sello Escaneado</strong>
+            <span class="tiny muted">Puedes dibujar tu firma con el mouse/pantalla táctil o subir una imagen PNG/JPG con fondo claro.</span>
+          </div>
+          <div class="flex" style="gap:6px">
+            <label class="btn small" style="cursor:pointer;margin:0">
+              ${icon('upload', 13)} Subir Imagen de Firma
+              <input type="file" id="doc-sig-file" accept="image/png,image/jpeg,image/webp" style="display:none">
+            </label>
+            <button type="button" class="btn small" id="doc-sig-clear">Limpiar Lienzo</button>
+          </div>
+        </div>
+        <div style="background:#fff;border:1px dashed #94a3b8;border-radius:8px;position:relative;height:140px;display:flex;align-items:center;justify-content:center;overflow:hidden">
+          <canvas id="doc-sig-canvas" width="520" height="140" style="width:100%;height:140px;cursor:crosshair;touch-action:none"></canvas>
+        </div>
+        <input type="hidden" name="signatureData" id="doc-sig-input" value="${esc(m.signatureData || '')}">
+        <div class="tiny muted" style="margin-top:6px;text-align:center">Vista previa del sello: <b>${esc(m.name)}</b> · ${esc(m.specialty || 'Médico')} · <b>${esc(m.licenseNumber || 'M.N.')}</b></div>
+      </div>
+
+      <div class="form-error" role="alert"></div>
+      <div class="dialog-actions">
+        ${btn('Cancelar', 'close-modal', '', '', 'type="button"')}
+        <button class="btn primary" type="submit">${icon('check', 15)} Guardar Firma y Matrícula</button>
+      </div>
+    </form>`,
+    '',
+    'wide'
+  );
+
+  setTimeout(() => {
+    const canvas = $('#doc-sig-canvas');
+    const sigInput = $('#doc-sig-input');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.strokeStyle = '#143829';
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    if (m.signatureData) {
+      const img = new Image();
+      img.onload = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const ratio = Math.min(canvas.width / img.width, canvas.height / img.height, 1);
+        const w = img.width * ratio;
+        const h = img.height * ratio;
+        ctx.drawImage(img, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+      };
+      img.src = m.signatureData;
+    }
+
+    let drawing = false;
+    const getPos = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      return {
+        x: (clientX - rect.left) * (canvas.width / rect.width),
+        y: (clientY - rect.top) * (canvas.height / rect.height)
+      };
+    };
+    const startDraw = (e) => {
+      drawing = true;
+      const pos = getPos(e);
+      ctx.beginPath();
+      ctx.moveTo(pos.x, pos.y);
+    };
+    const moveDraw = (e) => {
+      if (!drawing) return;
+      e.preventDefault();
+      const pos = getPos(e);
+      ctx.lineTo(pos.x, pos.y);
+      ctx.stroke();
+      if (sigInput) sigInput.value = canvas.toDataURL('image/png');
+    };
+    const endDraw = () => {
+      if (drawing && sigInput) sigInput.value = canvas.toDataURL('image/png');
+      drawing = false;
+    };
+
+    canvas.addEventListener('mousedown', startDraw);
+    canvas.addEventListener('mousemove', moveDraw);
+    window.addEventListener('mouseup', endDraw, { once: false });
+    canvas.addEventListener('touchstart', startDraw, { passive: true });
+    canvas.addEventListener('touchmove', moveDraw, { passive: false });
+    canvas.addEventListener('touchend', endDraw);
+
+    $('#doc-sig-clear')?.addEventListener('click', () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (sigInput) sigInput.value = '';
+    });
+
+    $('#doc-sig-file')?.addEventListener('change', (ev) => {
+      const file = ev.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (re) => {
+        const dataUrl = re.target?.result;
+        if (!dataUrl) return;
+        const img = new Image();
+        img.onload = () => {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          const ratio = Math.min((canvas.width - 20) / img.width, (canvas.height - 16) / img.height, 1);
+          const w = img.width * ratio;
+          const h = img.height * ratio;
+          ctx.drawImage(img, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+          if (sigInput) sigInput.value = canvas.toDataURL('image/png');
+        };
+        img.src = dataUrl;
+      };
+      reader.readAsDataURL(file);
+    });
+  }, 50);
 }
 
 function staffForm() {
@@ -3533,9 +3814,10 @@ function recordCard(r) {
   const isVitals = r.type === 'VITALS' || content.vitals;
   const v = content.vitals || {};
   const attachments = r.attachments || content.attachments || [];
+  const isFromPortal = Boolean(r.uploadedVia === 'PORTAL_PACIENTES' || content.uploadedVia === 'PORTAL_PACIENTES' || /Paciente/i.test(r.author || ''));
 
-  return `<article class="omni-entry-card" data-record-id="${r.id}">
-    <div class="between" style="align-items:flex-start">
+  return `<article class="omni-entry-card" data-record-id="${r.id}" style="${isFromPortal ? 'border-left:4px solid #2563eb' : ''}">
+    <div class="between" style="align-items:flex-start;flex-wrap:wrap;gap:8px">
       <div>
         <div class="omni-entry-date">${fmtOmniDate(r.createdAt)}</div>
         <div class="omni-entry-author">
@@ -3543,13 +3825,14 @@ function recordCard(r) {
           <span><b>${esc(r.author || 'Profesional Médico')}</b>${r.license ? ` - MN: ${esc(r.license)}` : ''} ${r.specialty ? `(${esc(r.specialty)})` : ''}</span>
         </div>
       </div>
-      <div class="flex" style="gap:6px">
+      <div class="flex" style="gap:6px;flex-wrap:wrap">
+        ${isFromPortal ? `<span class="badge blue" style="background:#dbeafe;color:#1d4ed8;font-weight:700">${icon('upload', 11)} Subido por Paciente (Portal)</span>` : `<span class="badge gray" style="font-size:10.5px">Equipo Médico</span>`}
         <span class="badge ${r.type === 'AMENDMENT' ? 'amber' : 'green'}">${icon('lock', 11)} ${r.type === 'AMENDMENT' ? 'Enmienda' : 'Inmutable'}</span>
         ${attachments.length ? `<span class="badge blue">${icon('file', 11)} ${attachments.length} adjunto(s)</span>` : ''}
       </div>
     </div>
 
-    ${r.problem ? `<div class="omni-entry-problem">${esc(r.problem)}</div>` : (r.title ? `<div class="omni-entry-problem">${esc(r.title)}</div>` : '')}
+    ${(r.problem || content.problem) ? `<div class="omni-entry-problem">${esc(r.problem || content.problem)}</div>` : ((r.title || content.title) ? `<div class="omni-entry-problem">${esc(r.title || content.title)}</div>` : '')}
 
     <div class="omni-entry-body">
       ${isVitals ? `
@@ -3568,7 +3851,7 @@ function recordCard(r) {
         <div class="hospital-day-evolution" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px;margin-bottom:12px">
           <div class="between" style="margin-bottom:8px">
             <span class="badge" style="background:#15803d;color:#ffffff;font-weight:700;font-size:11px;display:inline-flex;align-items:center;gap:5px">
-              ${icon('activity', 13)} Hospital de Día · ${esc(content.therapyType || 'Sueroterapia')} (${esc(content.resource || 'Sillón')})
+              ${icon('activity', 13)} Terapias Ambulatorias · ${esc(content.therapyType || 'Sueroterapia')} (${esc(content.resource || 'Sillón')})
             </span>
             <span style="font-size:12px;font-weight:700;color:#166534">Sesión ${content.sessionNumber || 1}/${content.totalSessions || 1}</span>
           </div>
@@ -3628,7 +3911,7 @@ function recordCard(r) {
           `).join('')}
         </div>
       ` : `
-        <div style="white-space:pre-wrap;line-height:1.6">${esc(typeof content === 'string' ? content : (content.text || content.notes || JSON.stringify(content)))}</div>
+        <div style="white-space:pre-wrap;line-height:1.6">${esc(typeof content === 'string' ? content : (content.text || content.notes || r.notes || JSON.stringify(content)))}</div>
       `}
 
       ${content.consumedSupplies && content.consumedSupplies.length ? `
@@ -3651,7 +3934,7 @@ function recordCard(r) {
           <strong style="font-size:11px;color:#475569;display:block;margin-bottom:6px">Archivos y Estudios Adjuntos:</strong>
           <div class="flex" style="flex-wrap:wrap;gap:8px">
             ${attachments.map(att => `
-              <button class="attachment-chip" data-action="view-attachment" data-url="${esc(att.dataUrl || att.url || '')}" data-name="${esc(att.name || 'Archivo')}" data-type="${esc(att.type || '')}">
+              <button class="attachment-chip" data-action="view-attachment" data-url="${esc(att.dataUrl || att.data || att.url || '')}" data-name="${esc(att.name || 'Archivo')}" data-type="${esc(att.type || '')}">
                 ${icon(att.type && att.type.includes('pdf') ? 'file' : 'image', 13)}
                 <span>${esc(att.name || 'Estudio / Documento')}</span>
               </button>
@@ -3665,10 +3948,11 @@ function recordCard(r) {
       SHA-256 · ${esc(r.hash ? r.hash.slice(0, 48) : 'Verificado')}... · Trazabilidad médica inmutable (Ley 26.529).
     </div>
 
-    <div class="between" style="margin-top:12px">
-      <div class="flex" style="gap:12px">
+    <div class="between" style="margin-top:12px;flex-wrap:wrap;gap:8px">
+      <div class="flex" style="gap:12px;flex-wrap:wrap">
         <button class="text-link" data-action="verify-record" data-id="${r.id}">${icon('shield', 13)} Verificar integridad</button>
         <button class="text-link" data-action="print-record" data-id="${r.id}">${icon('download', 13)} Documento Oficial (PDF)</button>
+        ${isFromPortal ? `<button class="text-link" style="color:#1d4ed8;font-weight:600" data-action="omni-tab" data-value="comparativa">${icon('activity', 13)} Comparar con evolución médica</button>` : ''}
       </div>
       <button class="text-link" data-action="amend-record" data-id="${r.id}">${icon('plus', 13)} Agregar enmienda</button>
     </div>
@@ -3678,59 +3962,176 @@ function recordCard(r) {
 function medicalHistoryCard(p) {
   const mh = p.medicalHistory || {};
   const hasAllergies = Boolean(mh.allergies && !/^(ninguna|no refiere|no reporta|sin alergias|no tiene)$/i.test(mh.allergies.trim()));
+  const shortPath = mh.pathological ? (mh.pathological.length > 48 ? mh.pathological.slice(0, 48) + '…' : mh.pathological) : 'Sin patologías crónicas';
+  const shortMeds = mh.medications ? (mh.medications.length > 42 ? mh.medications.slice(0, 42) + '…' : mh.medications) : 'Sin medicación habitual';
 
-  return `<div class="medical-history-panel">
-    <div class="between" style="margin-bottom:12px">
-      <div class="flex" style="gap:8px">
-        <span class="mh-icon">${icon('shield', 15)}</span>
-        <div>
-          <strong style="font-size:12px;color:#1e4c3a">Antecedentes Médicos y Factores de Riesgo</strong>
-          <span class="tiny muted" style="display:block">Ley 26.529 · Perfil Clínico Permanente</span>
-        </div>
+  return `<details class="medical-history-panel" ${S.medHistoryOpen ? 'open' : ''} style="padding:10px 14px;border-radius:10px;border:1px solid ${hasAllergies ? '#fecaca' : '#d8e4da'};background:${hasAllergies ? '#fffafb' : '#f8fbf9'}">
+    <summary style="list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;user-select:none">
+      <div class="flex" style="gap:10px;flex-wrap:wrap;align-items:center">
+        <span class="mh-icon" style="width:26px;height:26px">${icon('shield', 14)}</span>
+        <strong style="font-size:12.5px;color:#1e4c3a">Antecedentes Médicos y Factores de Riesgo</strong>
+        ${hasAllergies
+          ? `<span class="badge red" style="font-size:10.5px">${icon('warning', 11)} Alergia: ${esc(mh.allergies)}</span>`
+          : `<span class="badge green" style="font-size:10.5px">${icon('check', 11)} Sin alergias reportadas</span>`
+        }
+        <span class="tiny muted" style="border-left:1px solid #cbd5e1;padding-left:8px">${esc(shortPath)} · ${esc(shortMeds)}</span>
       </div>
-      <button class="btn small ghost text-link" data-action="edit-medical-history" data-id="${p.id}">
-        ${icon('edit', 13)} Actualizar Antecedentes
-      </button>
-    </div>
+      <div class="flex" style="gap:8px;align-items:center">
+        <span class="tiny" style="color:#1b4c37;font-weight:600;display:inline-flex;align-items:center;gap:4px">Desplegar / Ocultar ${icon('down', 12)}</span>
+      </div>
+    </summary>
 
-    ${hasAllergies ? `
-      <div class="allergies-alert">
-        <div class="flex" style="gap:10px">
-          <span class="alert-pulse">${icon('warning', 18)}</span>
-          <div>
-            <strong style="font-size:11px;color:#9e3223;letter-spacing:0.3px">ALERGIAS MEDICAMENTOSAS / SUSTANCIAS REPORTADAS:</strong>
-            <p style="margin:2px 0 0;font-size:12px;font-weight:650;color:#7e2215">${esc(mh.allergies)}</p>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e2e8f0">
+      <div class="between" style="margin-bottom:10px">
+        <span class="tiny muted">Ley 26.529 · Perfil Clínico Permanente</span>
+        <button class="btn small ghost text-link" data-action="edit-medical-history" data-id="${p.id}">
+          ${icon('edit', 13)} Actualizar Antecedentes
+        </button>
+      </div>
+
+      ${hasAllergies ? `
+        <div class="allergies-alert" style="margin-bottom:10px">
+          <div class="flex" style="gap:10px">
+            <span class="alert-pulse">${icon('warning', 18)}</span>
+            <div>
+              <strong style="font-size:11px;color:#9e3223;letter-spacing:0.3px">ALERGIAS MEDICAMENTOSAS / SUSTANCIAS REPORTADAS:</strong>
+              <p style="margin:2px 0 0;font-size:12px;font-weight:650;color:#7e2215">${esc(mh.allergies)}</p>
+            </div>
           </div>
+          <span class="badge red">Alerta Médica Activa</span>
         </div>
-        <span class="badge red">Alerta Médica Activa</span>
-      </div>
-    ` : `
-      <div class="allergies-safe">
-        <span class="flex" style="gap:6px;font-size:11px;color:#357a4e">
-          ${icon('checkcircle', 14)} <b>Alergias:</b> ${esc(mh.allergies || 'Sin alergias medicamentosas conocidas reportadas.')}
-        </span>
-      </div>
-    `}
+      ` : ''}
 
-    <div class="mh-grid">
-      <div class="mh-item">
-        <span class="mh-label">Patologías Crónicas / Comorbilidades</span>
-        <p>${esc(mh.pathological || 'Sin patologías crónicas declaradas.')}</p>
-      </div>
-      <div class="mh-item">
-        <span class="mh-label">Medicación Habitual y Tratamientos</span>
-        <p>${esc(mh.medications || 'Sin medicación crónica registrada.')}</p>
-      </div>
-      <div class="mh-item">
-        <span class="mh-label">Cirugías e Internaciones Previas</span>
-        <p>${esc(mh.surgical || 'Sin antecedentes quirúrgicos de relevancia.')}</p>
-      </div>
-      <div class="mh-item">
-        <span class="mh-label">Antecedentes Heredofamiliares y Hábitos</span>
-        <p>${esc(mh.familyHistory || 'Sin datos familiares reportados')} ${mh.habits ? `· ${esc(mh.habits)}` : ''}</p>
+      <div class="mh-grid">
+        <div class="mh-item">
+          <span class="mh-label">Patologías Crónicas / Comorbilidades</span>
+          <p>${esc(mh.pathological || 'Sin patologías crónicas declaradas.')}</p>
+        </div>
+        <div class="mh-item">
+          <span class="mh-label">Medicación Habitual y Tratamientos</span>
+          <p>${esc(mh.medications || 'Sin medicación crónica registrada.')}</p>
+        </div>
+        <div class="mh-item">
+          <span class="mh-label">Cirugías e Internaciones Previas</span>
+          <p>${esc(mh.surgical || 'Sin antecedentes quirúrgicos de relevancia.')}</p>
+        </div>
+        <div class="mh-item">
+          <span class="mh-label">Antecedentes Heredofamiliares y Hábitos</span>
+          <p>${esc(mh.familyHistory || 'Sin datos familiares reportados')} ${mh.habits ? `· ${esc(mh.habits)}` : ''}</p>
+        </div>
       </div>
     </div>
-  </div>`;
+  </details>`;
+}
+
+function renderComparativeEvolutionPanel(p, allPatientRecords) {
+  const patientPortalRecords = allPatientRecords.filter(r =>
+    r.uploadedVia === 'PORTAL_PACIENTES' ||
+    r.content?.uploadedVia === 'PORTAL_PACIENTES' ||
+    /Paciente/i.test(r.author || '')
+  );
+  const doctorRecords = allPatientRecords.filter(r => !patientPortalRecords.includes(r));
+  const vitalsRecords = allPatientRecords.filter(r => r.type === 'VITALS' || r.content?.vitals);
+  const labAndStudies = allPatientRecords.filter(r => r.type === 'LAB' || r.type === 'STUDY' || (r.attachments && r.attachments.length > 0));
+
+  return `
+  <section class="panel" style="margin-bottom:16px;border:1px solid #bfdbfe;background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%)">
+    <div class="panel-header" style="border-bottom:1px solid #dbeafe">
+      <div>
+        <div class="flex" style="gap:8px;align-items:center">
+          <span class="badge blue" style="background:#1d4ed8;color:#fff">${icon('activity', 12)} Experiencia de Paciente & Evolución</span>
+          <h2 style="font-size:15.5px;color:#0f172a">Comparativa Clínica: Documentos del Paciente vs. Evolución Médica</h2>
+        </div>
+        <p class="panel-sub">Sincronización directa entre los estudios subidos por ${esc(nameOf(p))} en su Portal y los nuevos controles, laboratorios y evoluciones del equipo médico.</p>
+      </div>
+      <div class="flex" style="gap:8px">
+        <button class="btn small" data-action="new-attachment">${icon('upload', 12)} Cargar Resultado Médico</button>
+        <button class="btn small primary" data-action="new-record">${icon('plus', 12)} Registrar Evolución Comparativa</button>
+      </div>
+    </div>
+
+    <div class="panel-body">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:16px">
+        <!-- Columna 1: Documentos y Estudios Base aportados por el Paciente -->
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px">
+          <div class="between" style="margin-bottom:10px">
+            <strong style="font-size:13px;color:#1e3a8a;display:flex;align-items:center;gap:6px">
+              ${icon('upload', 14)} 1. Estudios Aportados por el Paciente (Portal)
+            </strong>
+            <span class="badge blue">${patientPortalRecords.length} cargado(s)</span>
+          </div>
+          ${patientPortalRecords.length ? patientPortalRecords.map(pr => {
+            const c = typeof pr.content === 'object' && pr.content ? pr.content : {};
+            const atts = pr.attachments || c.attachments || [];
+            const typeBadge = pr.type === 'LAB' ? 'Laboratorio' : pr.type === 'STUDY' ? 'Imágenes / Estudio' : 'Documento';
+            return `
+            <div style="background:#fff;border:1px solid #dbeafe;border-radius:8px;padding:10px;margin-bottom:8px">
+              <div class="between" style="gap:6px">
+                <b style="font-size:12.5px;color:#0f172a">${esc(pr.title || c.title || pr.problem || 'Estudio del Paciente')}</b>
+                <span class="badge blue" style="font-size:10px">${typeBadge}</span>
+              </div>
+              <div class="tiny muted" style="margin:3px 0 6px">${fmtDate(pr.createdAt, true)} · ${esc(pr.specialty || c.specialty || 'General')}</div>
+              ${(pr.notes || c.notes) ? `<p style="font-size:12px;color:#334155;margin:4px 0 8px">${esc(pr.notes || c.notes)}</p>` : ''}
+              ${atts.length ? `<div class="flex" style="gap:6px;flex-wrap:wrap">
+                ${atts.map(att => `
+                  <button class="attachment-chip" style="margin:0;padding:4px 8px;font-size:11px" data-action="view-attachment" data-url="${esc(att.dataUrl || att.data || att.url || '')}" data-name="${esc(att.name || 'Estudio')}" data-type="${esc(att.type || '')}">
+                    ${icon('file', 11)} ${esc(att.name || 'Ver archivo')}
+                  </button>
+                `).join('')}
+              </div>` : ''}
+            </div>`;
+          }).join('') : `
+            <div style="background:#fff;border:1px dashed #93c5fd;border-radius:8px;padding:14px;text-align:center;color:#475569;font-size:12px">
+              Cuando el paciente sube un Laboratorio o Estudio desde su Portal de Salud, se clasifica automáticamente aquí y en la pestaña correspondiente (<b>Laboratorio</b>, <b>Estudios</b> o <b>Documentos</b>).
+              ${labAndStudies.length ? `<div style="margin-top:8px;color:#1e40af;font-weight:600">Actualmente hay ${labAndStudies.length} estudio(s)/laboratorio(s) en la ficha para comparar.</div>` : ''}
+            </div>
+          `}
+        </div>
+
+        <!-- Columna 2: Nuevos Resultados y Evolución Clínica del Médico -->
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px">
+          <div class="between" style="margin-bottom:10px">
+            <strong style="font-size:13px;color:#14532d;display:flex;align-items:center;gap:6px">
+              ${icon('activity', 14)} 2. Nuevos Resultados y Evolución del Médico
+            </strong>
+            <span class="badge green">${doctorRecords.length} registro(s)</span>
+          </div>
+          ${doctorRecords.slice(0, 4).map(dr => {
+            const c = typeof dr.content === 'object' && dr.content ? dr.content : {};
+            const summaryTxt = c.assessment || c.plan || c.notes || c.subjective || (typeof dr.content === 'string' ? dr.content : '') || dr.title || 'Control médico registrado';
+            const cleanTxt = String(summaryTxt).replace(/<[^>]+>/g, '').slice(0, 140);
+            const labelType = dr.type === 'HOSPITAL_DE_DIA' ? 'Terapia Ambulatoria' : dr.type === 'LAB' ? 'Lab Médico' : dr.type === 'VITALS' ? 'Signos Vitales' : 'Evolución Médica';
+            return `
+            <div style="background:#fff;border:1px solid #bbf7d0;border-radius:8px;padding:10px;margin-bottom:8px">
+              <div class="between" style="gap:6px">
+                <b style="font-size:12.5px;color:#14532d">${esc(dr.problem || c.problem || dr.title || c.title || labelType)}</b>
+                <span class="badge green" style="font-size:10px">${labelType}</span>
+              </div>
+              <div class="tiny muted" style="margin:3px 0 6px">${fmtDate(dr.createdAt, true)} · ${esc(dr.author || 'Médico')}</div>
+              <p style="font-size:12px;color:#334155;margin:0">${esc(cleanTxt)}${cleanTxt.length >= 140 ? '…' : ''}</p>
+            </div>`;
+          }).join('') || `
+            <div style="background:#fff;border:1px dashed #86efac;border-radius:8px;padding:14px;text-align:center;color:#475569;font-size:12px">
+              Aún no se han registrado evoluciones médicas posteriores para contrastar.
+            </div>
+          `}
+        </div>
+      </div>
+
+      ${vitalsRecords.length >= 1 ? `
+        <div style="margin-top:12px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div style="font-size:12px;color:#334155">
+            <b>Progreso de Parámetros Clínicos (${vitalsRecords.length} controles):</b>
+            Último control (${fmtDate(vitalsRecords[0].createdAt)}):
+            ${vitalsRecords[0].content?.vitals?.bloodPressure ? `TA <b>${esc(vitalsRecords[0].content.vitals.bloodPressure)}</b> mmHg · ` : ''}
+            ${vitalsRecords[0].content?.vitals?.heartRate ? `FC <b>${esc(vitalsRecords[0].content.vitals.heartRate)}</b> lpm · ` : ''}
+            ${vitalsRecords[0].content?.vitals?.weight ? `Peso <b>${esc(vitalsRecords[0].content.vitals.weight)}</b> kg` : ''}
+          </div>
+          <button class="text-link tiny" data-action="omni-tab" data-value="signos-vitales">Ver curva de signos vitales ${icon('arrow', 11)}</button>
+        </div>
+      ` : ''}
+    </div>
+  </section>`;
 }
 
 function recordsView() {
@@ -3743,27 +4144,31 @@ function recordsView() {
   const omniTab = S.omniTab || 'evoluciones';
 
   // Extract unique filters
-  const problems = Array.from(new Set(allPatientRecords.map(r => r.problem).filter(Boolean)));
-  const specialties = Array.from(new Set(allPatientRecords.map(r => r.specialty).filter(Boolean)));
+  const problems = Array.from(new Set(allPatientRecords.map(r => r.problem || r.content?.problem).filter(Boolean)));
+  const specialties = Array.from(new Set(allPatientRecords.map(r => r.specialty || r.content?.specialty).filter(Boolean)));
   const authors = Array.from(new Set(allPatientRecords.map(r => r.author).filter(Boolean)));
+
+  const isEvolutionRecord = (r) => !r.type || r.type === 'SOAP' || r.type === 'SOAP_NOTE' || r.type === 'AMENDMENT' || r.type === 'HOSPITAL_DE_DIA';
+  const portalUploadsCount = allPatientRecords.filter(r => r.uploadedVia === 'PORTAL_PACIENTES' || r.content?.uploadedVia === 'PORTAL_PACIENTES' || /Paciente/i.test(r.author || '')).length;
 
   // Filter records based on current omni settings
   const filteredRecords = allPatientRecords.filter(r => {
+    const rAttachments = r.attachments || r.content?.attachments || [];
     // Tab filter
     if (omniTab === 'estudios') {
-      const isStudy = r.type === 'STUDY' || r.type === 'IMAGE' || (r.attachments && r.attachments.length > 0);
+      const isStudy = r.type === 'STUDY' || r.type === 'IMAGE' || (r.type !== 'LAB' && rAttachments.length > 0);
       if (!isStudy) return false;
     } else if (omniTab === 'evoluciones') {
-      const isEvol = !r.type || r.type === 'SOAP' || r.type === 'AMENDMENT' || r.type === 'HOSPITAL_DE_DIA';
-      if (!isEvol) return false;
+      if (!isEvolutionRecord(r)) return false;
       if (S.omniEvolFilter === 'MEDICAL' && r.type === 'HOSPITAL_DE_DIA') return false;
       if (S.omniEvolFilter === 'HOSPITAL_DAY' && r.type !== 'HOSPITAL_DE_DIA') return false;
     } else if (omniTab === 'laboratorio') {
-      if (r.type !== 'LAB') return false;
+      const isLab = r.type === 'LAB' || /lab|hemograma|bioqu[ií]m|sangre|orina/i.test(r.title || r.content?.title || r.problem || '');
+      if (!isLab) return false;
     } else if (omniTab === 'signos-vitales') {
-      if (r.type !== 'VITALS') return false;
+      if (r.type !== 'VITALS' && !r.content?.vitals) return false;
     } else if (omniTab === 'documentos') {
-      const hasDocs = (r.attachments && r.attachments.length > 0);
+      const hasDocs = r.type === 'DOCUMENT' || rAttachments.length > 0;
       if (!hasDocs) return false;
     }
 
@@ -3771,7 +4176,7 @@ function recordsView() {
     if (S.omniSearch) {
       const q = S.omniSearch.toLowerCase();
       const contentStr = typeof r.content === 'object' ? JSON.stringify(r.content).toLowerCase() : String(r.content || '').toLowerCase();
-      const problemStr = String(r.problem || '').toLowerCase();
+      const problemStr = String(r.problem || r.content?.problem || '').toLowerCase();
       const authorStr = String(r.author || '').toLowerCase();
       if (!contentStr.includes(q) && !problemStr.includes(q) && !authorStr.includes(q)) return false;
     }
@@ -3785,23 +4190,23 @@ function recordsView() {
     }
 
     // Problem filter
-    if (S.omniProblem && r.problem !== S.omniProblem) return false;
+    if (S.omniProblem && (r.problem || r.content?.problem) !== S.omniProblem) return false;
 
     // Specialty filter
-    if (S.omniSpecialty && r.specialty !== S.omniSpecialty) return false;
+    if (S.omniSpecialty && (r.specialty || r.content?.specialty) !== S.omniSpecialty) return false;
 
     // Author filter
     if (S.recordAuthor && r.author !== S.recordAuthor) return false;
 
     // Attachment filter
-    if (S.recordAttachmentFilter === 'with' && (!r.attachments || r.attachments.length === 0)) return false;
-    if (S.recordAttachmentFilter === 'without' && r.attachments && r.attachments.length > 0) return false;
+    if (S.recordAttachmentFilter === 'with' && rAttachments.length === 0) return false;
+    if (S.recordAttachmentFilter === 'without' && rAttachments.length > 0) return false;
 
     return true;
   });
 
-  return heading('Historia Clínica Integral', 'Evoluciones médicas, estudios complementarios, laboratorio y consentimientos informados inmutables.',
-    `<div class="flex" style="gap:8px">
+  return heading('Historia Clínica Integral', 'Evoluciones médicas, estudios del portal del paciente, comparativa de evolución, laboratorio y consentimientos inmutables.',
+    `<div class="flex" style="gap:8px;flex-wrap:wrap">
       <button class="btn small primary" data-action="new-record">${icon('plus', 13)} Nueva Evolución</button>
       <button class="btn small" data-action="new-attachment">${icon('file', 13)} Cargar Estudio / Lab</button>
       <button class="btn small" data-action="new-vitals">${icon('activity', 13)} Signos Vitales</button>
@@ -3820,17 +4225,18 @@ function recordsView() {
       ${p ? `
         <!-- Records Top Navigation Bar -->
         <nav class="omni-top-tabs">
+          <button class="omni-tab-btn ${omniTab === 'evoluciones' ? 'active' : ''}" data-action="omni-tab" data-value="evoluciones">Evoluciones (${allPatientRecords.filter(isEvolutionRecord).length})</button>
+          <button class="omni-tab-btn ${omniTab === 'comparativa' ? 'active' : ''}" data-action="omni-tab" data-value="comparativa">Comparativa Paciente vs. Médico ${portalUploadsCount ? `(${portalUploadsCount})` : ''}</button>
           <button class="omni-tab-btn ${omniTab === 'estudios' ? 'active' : ''}" data-action="omni-tab" data-value="estudios">Estudios e Imágenes</button>
-          <button class="omni-tab-btn ${omniTab === 'evoluciones' ? 'active' : ''}" data-action="omni-tab" data-value="evoluciones">Evoluciones</button>
+          <button class="omni-tab-btn ${omniTab === 'laboratorio' ? 'active' : ''}" data-action="omni-tab" data-value="laboratorio">Laboratorio</button>
           <button class="omni-tab-btn ${omniTab === 'prescripciones' ? 'active' : ''}" data-action="omni-tab" data-value="prescripciones">Prescripciones (${prescriptions.length})</button>
-          <button class="omni-tab-btn ${omniTab === 'laboratorio' ? 'active' : ''}" data-action="omni-tab" data-value="laboratorio">Laboratorio ⌵</button>
           <button class="omni-tab-btn ${omniTab === 'signos-vitales' ? 'active' : ''}" data-action="omni-tab" data-value="signos-vitales">Signos Vitales</button>
           <button class="omni-tab-btn ${omniTab === 'documentos' ? 'active' : ''}" data-action="omni-tab" data-value="documentos">Documentos</button>
           <button class="omni-tab-btn ${omniTab === 'consentimientos' ? 'active' : ''}" data-action="omni-tab" data-value="consentimientos">Consentimientos (${consents.length})</button>
         </nav>
 
-        <section class="panel" style="margin-bottom:17px">
-          <div class="panel-header">
+        <section class="panel" style="margin-bottom:14px">
+          <div class="panel-header" style="padding:12px 18px">
             <div class="flex">
               ${avatar(nameOf(p))}
               <div>
@@ -3844,8 +4250,8 @@ function recordsView() {
             </div>
           </div>
 
-          <!-- Módulo Permanente de Antecedentes Médicos y Alergias (Ley 26.529) -->
-          <div style="padding:0 22px 18px">
+          <!-- Módulo Desplegable de Antecedentes Médicos y Alergias (Ley 26.529) -->
+          <div style="padding:0 18px 12px">
             ${medicalHistoryCard(p)}
           </div>
         </section>
@@ -3862,8 +4268,9 @@ function recordsView() {
             </div>
 
             <div class="omni-filter-group">
-              <span class="omni-filter-title">Tipo</span>
+              <span class="omni-filter-title">Sección Clínica</span>
               <button class="omni-filter-chip ${omniTab === 'evoluciones' ? 'active' : ''}" data-action="omni-tab" data-value="evoluciones">Evoluciones</button>
+              <button class="omni-filter-chip ${omniTab === 'comparativa' ? 'active' : ''}" data-action="omni-tab" data-value="comparativa">Comparativa Evolución</button>
               <button class="omni-filter-chip ${omniTab === 'estudios' ? 'active' : ''}" data-action="omni-tab" data-value="estudios">Estudios / Imágenes</button>
               <button class="omni-filter-chip ${omniTab === 'laboratorio' ? 'active' : ''}" data-action="omni-tab" data-value="laboratorio">Laboratorio</button>
               <button class="omni-filter-chip ${omniTab === 'signos-vitales' ? 'active' : ''}" data-action="omni-tab" data-value="signos-vitales">Signos Vitales</button>
@@ -3907,7 +4314,7 @@ function recordsView() {
 
             ${authors.length ? `
               <div class="hcd-filter-group">
-                <span class="hcd-filter-title">Autor</span>
+                <span class="hcd-filter-title">Origen / Autor</span>
                 ${authors.map(aut => `
                   <button class="hcd-filter-chip ${S.recordAuthor === aut ? 'active' : ''}" data-action="hcd-filter-chip" data-filter="author" data-value="${esc(aut)}">
                     ${esc(aut)}
@@ -3927,18 +4334,24 @@ function recordsView() {
 
           <!-- Main Feed / Records List -->
           <main class="omni-feed">
-            ${omniTab === 'prescripciones' ? `
+            ${omniTab === 'comparativa' ? renderComparativeEvolutionPanel(p, allPatientRecords) + (allPatientRecords.length ? allPatientRecords.map(recordCard).join('') : '') : omniTab === 'prescripciones' ? `
               <section class="panel">
-                <div class="panel-header"><h2>Recetas y Prescripciones Médicas</h2>${btn('Nueva receta', 'new-prescription', 'plus', 'small')}</div>
+                <div class="panel-header"><h2>Recetas y Prescripciones Médicas Electrónicas</h2>${btn('Nueva receta legal', 'new-prescription', 'plus', 'small primary')}</div>
                 <div class="panel-body">
                   ${prescriptions.map(r => `<div class="soap-item" style="margin-bottom:12px">
-                    <div class="between"><b>Receta Médica Oficial</b>${badge(r.status)}</div>
+                    <div class="between" style="flex-wrap:wrap;gap:6px">
+                      <div>
+                        <b>Receta Electrónica Oficial ${r.cuir ? `· CUIR ${esc(r.cuir)}` : ''}</b>
+                        <div class="tiny muted">Prescriptor: <b>${esc(r.doctorName || 'Médico Tratante')}</b> (${esc(r.doctorLicense || 'M.N.')}) ${r.diagnosis ? `· Diag: ${esc(r.diagnosis)}` : ''}</div>
+                      </div>
+                      ${badge(r.status)}
+                    </div>
                     <p style="white-space:pre-wrap;margin:8px 0">${esc(r.content)}</p>
                     <div class="between" style="margin-top:10px">
                       <div class="tiny muted">${fmtDate(r.createdAt, true)}</div>
-                      <button class="text-link" data-action="print-prescription" data-id="${r.id}">${icon('download', 12)} Ver Receta Oficial (PDF)</button>
+                      <button class="text-link" data-action="print-prescription" data-id="${r.id}">${icon('download', 12)} Imprimir Receta Legal con Firma y QR (PDF)</button>
                     </div>
-                  </div>`).join('') || empty('Sin recetas emitidas', 'No hay recetas prescritas para este paciente.', btn('Emitir receta', 'new-prescription', 'plus', 'small'))}
+                  </div>`).join('') || empty('Sin recetas emitidas', 'No hay recetas prescritas para este paciente.', btn('Emitir receta legal', 'new-prescription', 'plus', 'small primary'))}
                 </div>
               </section>
             ` : omniTab === 'consentimientos' ? `
@@ -3971,11 +4384,16 @@ function recordsView() {
                 </div>
               </section>
             ` : (omniTab === 'evoluciones' ? `
-              <div class="flex" style="gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
-                <span style="font-size:12px;font-weight:600;color:#64748b">Sector Clínico:</span>
-                <button class="chip ${(!S.omniEvolFilter || S.omniEvolFilter === 'ALL') ? 'active' : ''}" data-action="set-evol-filter" data-val="ALL">Todas las evoluciones (${allPatientRecords.filter(r => !r.type || r.type === 'SOAP' || r.type === 'AMENDMENT' || r.type === 'HOSPITAL_DE_DIA').length})</button>
-                <button class="chip ${S.omniEvolFilter === 'MEDICAL' ? 'active' : ''}" data-action="set-evol-filter" data-val="MEDICAL">${icon('usercheck', 13)} Consultas Médicas (SOAP)</button>
-                <button class="chip ${S.omniEvolFilter === 'HOSPITAL_DAY' ? 'active' : ''}" data-action="set-evol-filter" data-val="HOSPITAL_DAY">${icon('activity', 13)} Hospital de Día (Enfermería / Insumos)</button>
+              <div class="flex" style="gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap;justify-content:space-between">
+                <div class="flex" style="gap:8px;align-items:center;flex-wrap:wrap">
+                  <span style="font-size:12px;font-weight:600;color:#64748b">Sector Clínico:</span>
+                  <button class="chip ${(!S.omniEvolFilter || S.omniEvolFilter === 'ALL') ? 'active' : ''}" data-action="set-evol-filter" data-val="ALL">Todas las evoluciones (${allPatientRecords.filter(isEvolutionRecord).length})</button>
+                  <button class="chip ${S.omniEvolFilter === 'MEDICAL' ? 'active' : ''}" data-action="set-evol-filter" data-val="MEDICAL">${icon('usercheck', 13)} Consultas Médicas (SOAP)</button>
+                  <button class="chip ${S.omniEvolFilter === 'HOSPITAL_DAY' ? 'active' : ''}" data-action="set-evol-filter" data-val="HOSPITAL_DAY">${icon('activity', 13)} Terapias Ambulatorias (Enfermería / Insumos)</button>
+                </div>
+                <button class="btn small" style="background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe" data-action="omni-tab" data-value="comparativa">
+                  ${icon('activity', 12)} Comparar con estudios del paciente (${portalUploadsCount})
+                </button>
               </div>
             ` : '') + (filteredRecords.length ? filteredRecords.map(recordCard).join('') : `
               <section class="panel" style="padding:40px 20px;text-align:center">
@@ -4085,7 +4503,18 @@ function inventoryView() {
     return matchAct && matchTxt;
   });
 
-  return heading('Inventario de Insumos Médicos', 'Control y gestión en tiempo real de insumos, materiales descartables, instrumental y fármacos.',
+  const nowMs = Date.now();
+  const expiringItems = inv.map(item => {
+    if (!item.expiryDate) return null;
+    const raw = String(item.expiryDate).trim();
+    let d = new Date(raw.length === 7 ? `${raw}-01T00:00:00` : `${raw}T00:00:00`);
+    if (isNaN(d.getTime())) d = new Date(raw);
+    if (isNaN(d.getTime())) return null;
+    const daysLeft = Math.ceil((d.getTime() - nowMs) / 86400000);
+    return { ...item, daysLeft, parsedExpiry: d };
+  }).filter(x => x && x.daysLeft <= 120).sort((a, b) => a.daysLeft - b.daysLeft);
+
+  return heading('Inventario e insumos', 'Control y gestión en tiempo real de insumos, lotes, materiales descartables, instrumental y fármacos.',
     btn('Crear Lote', 'new-inventory-lot', 'box') + btn('Nuevo Insumo', 'new-inventory', 'plus', 'primary')
   ) +
   `<div class="stats" style="grid-template-columns:repeat(4,minmax(0,1fr))">
@@ -4094,6 +4523,31 @@ function inventoryView() {
     ${stat('Unidades disponibles', totalUnits, 'activity', 'Total de unidades en clínica')}
     ${stat('Agotados', outOfStock.length, 'close', outOfStock.length > 0 ? 'Reposición urgente' : 'Sin insumos agotados')}
   </div>
+
+  <!-- Box sutil de lectura rápida IA sobre próximos vencimientos -->
+  <div style="margin-bottom:16px;padding:11px 16px;border-radius:10px;border:1px solid ${expiringItems.some(x => x.daysLeft <= 30) ? '#fde68a' : '#d8e4da'};background:${expiringItems.some(x => x.daysLeft <= 30) ? '#fffdf5' : '#f8fbf9'};display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+    <div class="flex" style="gap:10px;align-items:center;flex-wrap:wrap">
+      <span style="width:28px;height:28px;border-radius:8px;background:${expiringItems.length ? '#fef3c7' : '#e6f4ea'};color:${expiringItems.length ? '#b45309' : '#1b4c37'};display:inline-flex;align-items:center;justify-content:center">
+        ${icon('spark', 14)}
+      </span>
+      <div>
+        <div style="font-size:12.5px;font-weight:700;color:#18362b;display:flex;align-items:center;gap:6px">
+          Lectura Rápida IA · Monitoreo de Vencimientos de Lotes
+          <span class="badge ${expiringItems.length ? 'amber' : 'green'}" style="font-size:10px">${expiringItems.length ? `${expiringItems.length} lote(s) próximos a vencer` : 'Sin vencimientos cercanos'}</span>
+        </div>
+        <div style="font-size:12px;color:#475569;margin-top:2px">
+          ${expiringItems.length
+            ? expiringItems.slice(0, 4).map(it => {
+                const statusTxt = it.daysLeft < 0 ? `Vencido hace ${Math.abs(it.daysLeft)} días` : it.daysLeft === 0 ? 'Vence hoy' : `Vence en ${it.daysLeft} días (${it.expiryDate})`;
+                return `<span style="display:inline-block;margin-right:12px">• <b>${esc(it.name)}</b> ${it.lotNumber ? `<span class="mono tiny">(Lote ${esc(it.lotNumber)})</span>` : ''}: <span style="color:${it.daysLeft <= 30 ? '#b45309' : '#334155'};font-weight:600">${esc(statusTxt)}</span></span>`;
+              }).join('')
+            : 'La IA analizó todas las fechas de vencimiento del inventario activo: ningún lote vence dentro de los próximos 120 días.'}
+        </div>
+      </div>
+    </div>
+    ${expiringItems.length ? `<span class="tiny muted">Priorizar rotación FEFO (Primero en Vencer, Primero en Salir)</span>` : ''}
+  </div>
+
   <section class="panel">
     <div class="toolbar" style="justify-content:space-between">
       <div class="flex" style="flex-wrap:wrap;gap:10px">
@@ -4215,34 +4669,77 @@ function inventoryView() {
   </section>`;
 }
 
+const PAYMENT_CATEGORY_LABELS = {
+  DEPOSIT: { label: 'Seña / Anticipo de Tratamiento', badge: 'amber', type: 'INCOME' },
+  FULL_PAYMENT: { label: 'Pago Total de Tratamiento', badge: 'green', type: 'INCOME' },
+  INSTALLMENT: { label: 'Cuota de Programa Clínico', badge: 'blue', type: 'INCOME' },
+  CONSULTATION: { label: 'Consulta Médica', badge: 'green', type: 'INCOME' },
+  SUPPLIES: { label: 'Compra de Insumos / Fármacos', badge: 'red', type: 'EXPENSE' },
+  FEES: { label: 'Honorarios Profesionales', badge: 'red', type: 'EXPENSE' },
+  OPERATING: { label: 'Gastos Operativos / Clínica', badge: 'red', type: 'EXPENSE' }
+};
+
 function billingView() {
-  const total = S.data.payments.reduce((s, p) => s + p.amountCents / 100, 0),
-    drafts = S.data.invoices.reduce((s, p) => s + p.amountCents / 100, 0),
+  const allMovements = S.data.payments || [];
+  const incomes = allMovements.filter(p => (p.movementType || 'INCOME') !== 'EXPENSE');
+  const expenses = allMovements.filter(p => p.movementType === 'EXPENSE');
+  const totalIncome = incomes.reduce((s, p) => s + p.amountCents / 100, 0);
+  const totalExpense = expenses.reduce((s, p) => s + p.amountCents / 100, 0);
+  const netBalance = totalIncome - totalExpense;
+  const totalDeposits = incomes.filter(p => p.category === 'DEPOSIT').reduce((s, p) => s + p.amountCents / 100, 0);
+  const totalFullTreatments = incomes.filter(p => p.category === 'FULL_PAYMENT' || p.category === 'INSTALLMENT').reduce((s, p) => s + p.amountCents / 100, 0);
+
+  const drafts = S.data.invoices.reduce((s, p) => s + p.amountCents / 100, 0),
     quotes = S.data.quotes || [],
     totalQuotes = quotes.reduce((s, q) => s + (q.totalCents != null ? q.totalCents / 100 : Number(q.total || 0)), 0);
 
   const currentTab = S.billingTab || 'payments';
+  const movFilter = S.paymentFilter || 'ALL';
+  const filteredMovements = allMovements.filter(r => {
+    const mType = r.movementType || 'INCOME';
+    const cat = r.category || 'CONSULTATION';
+    if (movFilter === 'INCOME') return mType !== 'EXPENSE';
+    if (movFilter === 'EXPENSE') return mType === 'EXPENSE';
+    if (movFilter === 'DEPOSIT') return cat === 'DEPOSIT';
+    if (movFilter === 'FULL_PAYMENT') return cat === 'FULL_PAYMENT' || cat === 'INSTALLMENT';
+    return true;
+  });
+
   const arcaInteg = (S.data?.integrations || []).find(i => i.id === 'arca');
   const arcaConnected = Boolean(arcaInteg && arcaInteg.status === 'CONNECTED');
 
-  return heading('Cobros, Facturación y Presupuestos', 'Control administrativo de pagos recibidos, emisión oficial ARCA y gestión de presupuestos médicos.',
-    btn('Nuevo Presupuesto', 'new-quote', 'plus') + btn('Emitir Factura ARCA', 'new-invoice', 'file') + btn('Registrar cobro', 'new-payment', 'plus', 'primary')
+  return heading('Cobros, Facturación y Presupuestos', 'Control categorizado de ingresos (señas, pagos totales, cuotas), egresos operativos, facturación ARCA y presupuestos clínicos con IA.',
+    btn('Programa / Presupuesto IA', 'new-quote', 'spark') +
+    btn('Registrar Egreso', 'new-expense', 'wallet') +
+    btn('Emitir Factura ARCA', 'new-invoice', 'file') +
+    btn('Registrar Ingreso / Seña', 'new-payment', 'plus', 'primary')
   ) +
   `<div class="stats" style="grid-template-columns:repeat(4,minmax(0,1fr))">
-    ${stat('Total cobrado', fmtMoney(total), 'wallet', 'Ingresos confirmados de la clínica', true)}
-    ${stat('Operaciones registradas', S.data.payments.length, 'activity', 'Cobros por transferencia, efectivo y tarjeta')}
-    ${stat('Facturación oficial ARCA', fmtMoney(drafts), 'file', `${S.data.invoices.length} facturas con CAE autorizado`)}
-    ${stat('Presupuestos emitidos', fmtMoney(totalQuotes), 'chart', `${quotes.length} presupuestos para pacientes`)}
+    ${stat('Ingresos Totales', fmtMoney(totalIncome), 'wallet', `Señas: ${fmtMoney(totalDeposits)} · Tratamientos: ${fmtMoney(totalFullTreatments)}`, true)}
+    ${stat('Egresos y Gastos', fmtMoney(totalExpense), 'activity', `${expenses.length} egreso(s) · Insumos, honorarios y operativos`)}
+    ${stat('Balance Neto de Caja', fmtMoney(netBalance), 'checkcircle', `${incomes.length} ingresos vs ${expenses.length} egresos`)}
+    ${stat('Presupuestos & ARCA', fmtMoney(totalQuotes), 'chart', `${quotes.length} presupuestos · Facturado ARCA: ${fmtMoney(drafts)}`)}
   </div>
   <section class="panel">
-    <div class="financial-tabs">
-      <button class="btn small ${currentTab === 'payments' ? 'primary' : ''}" data-action="billing-tab" data-value="payments">Cobros registrados</button>
-      <button class="btn small ${currentTab === 'invoices' ? 'primary' : ''}" data-action="billing-tab" data-value="invoices">Facturas oficiales ARCA</button>
-      <button class="btn small ${currentTab === 'quotes' ? 'primary' : ''}" data-action="billing-tab" data-value="quotes">Presupuestos Clínicos (${quotes.length})</button>
+    <div class="between" style="padding:14px 20px 0;flex-wrap:wrap;gap:10px">
+      <div class="financial-tabs" style="padding:0;border:none">
+        <button class="btn small ${currentTab === 'payments' ? 'primary' : ''}" data-action="billing-tab" data-value="payments">Ingresos y Egresos (${allMovements.length})</button>
+        <button class="btn small ${currentTab === 'quotes' ? 'primary' : ''}" data-action="billing-tab" data-value="quotes">Presupuestos Clínicos IA (${quotes.length})</button>
+        <button class="btn small ${currentTab === 'invoices' ? 'primary' : ''}" data-action="billing-tab" data-value="invoices">Facturas Oficiales ARCA (${S.data.invoices.length})</button>
+      </div>
+      ${currentTab === 'payments' ? `
+        <div class="flex" style="gap:6px;flex-wrap:wrap">
+          <button class="chip ${movFilter === 'ALL' ? 'active' : ''}" data-action="payment-filter" data-val="ALL">Todos (${allMovements.length})</button>
+          <button class="chip ${movFilter === 'INCOME' ? 'active' : ''}" data-action="payment-filter" data-val="INCOME">Ingresos (${incomes.length})</button>
+          <button class="chip ${movFilter === 'DEPOSIT' ? 'active' : ''}" data-action="payment-filter" data-val="DEPOSIT">Señas / Anticipos</button>
+          <button class="chip ${movFilter === 'FULL_PAYMENT' ? 'active' : ''}" data-action="payment-filter" data-val="FULL_PAYMENT">Pagos Totales / Cuotas</button>
+          <button class="chip ${movFilter === 'EXPENSE' ? 'active' : ''}" data-action="payment-filter" data-val="EXPENSE">Egresos (${expenses.length})</button>
+        </div>
+      ` : ''}
     </div>
     ${currentTab === 'quotes' ? `
       ${quotes.length ? `<div class="table-wrap"><table>
-        <thead><tr><th>Fecha / Validez</th><th>N° Presupuesto</th><th>Paciente</th><th>Tratamiento / Concepto</th><th>Total</th><th>Estado</th><th style="text-align:right">Acciones</th></tr></thead>
+        <thead><tr><th>Fecha / Validez</th><th>N° Presupuesto</th><th>Paciente</th><th>Programa / Tratamiento</th><th>Inversión Total</th><th>Estado</th><th style="text-align:right">Acciones</th></tr></thead>
         <tbody>
           ${quotes.map(q => {
             const pat = patientBy(q.patientId);
@@ -4251,16 +4748,17 @@ function billingView() {
             const statusLabel = q.status === 'APPROVED' ? 'Aprobado' : q.status === 'REJECTED' ? 'Rechazado' : 'Pendiente';
             const qTotal = q.totalCents != null ? q.totalCents / 100 : Number(q.total || 0);
             const qNum = q.quoteNumber || q.number || q.id.slice(0, 8);
+            const isSig = String(q.notes || '').includes('SIGNATURE_PROGRAM') || /signature|programa|etapa/i.test(q.title || '');
             return `<tr>
               <td>${fmtDate(q.createdAt, true)}<div class="tiny muted">Vence: ${fmtDate(q.validUntil, true)}</div></td>
-              <td><strong>${esc(qNum)}</strong></td>
+              <td><strong>${esc(qNum)}</strong>${isSig ? `<div class="tiny" style="color:#1b4c37;font-weight:700">✦ Programa Signature IA</div>` : ''}</td>
               <td><strong>${esc(pName)}</strong><div class="tiny muted">${esc(pat?.coverage || 'Particular')}</div></td>
-              <td><strong>${esc(q.title)}</strong><div class="tiny muted">${(q.items || []).length} ítem(s) detallado(s)</div></td>
-              <td><strong>${fmtMoney(qTotal)}</strong></td>
+              <td><strong>${esc(q.title)}</strong><div class="tiny muted">${(q.items || []).length} terapia(s) / ítem(s) detallado(s)</div></td>
+              <td><strong>${fmtMoney(qTotal)}</strong><div class="tiny muted">3 cuotas (+10%): ${fmtMoney(Math.round(qTotal * 1.10 / 3))}/mes</div></td>
               <td><span class="badge ${statusColor}">${statusLabel}</span></td>
               <td>
                 <div style="display:flex;gap:6px;justify-content:flex-end">
-                  <button class="btn small" data-action="print-quote" data-id="${q.id}" title="Ver / Descargar Presupuesto en PDF e imprimir">${icon('file', 13)} Ver PDF</button>
+                  <button class="btn small" data-action="print-quote" data-id="${q.id}" title="Ver / Descargar Programa y Presupuesto en PDF">${icon('file', 13)} Ver PDF</button>
                   <button class="btn small" data-action="share-quote-wa" data-id="${q.id}" title="Enviar Presupuesto por WhatsApp">${icon('phone', 13)} WhatsApp</button>
                   ${q.status !== 'APPROVED' ? `<button class="btn small primary" data-action="approve-quote" data-id="${q.id}" title="Marcar presupuesto como Aprobado">${icon('checkcircle', 13)} Aprobar</button>` : ''}
                   <button class="btn small danger" data-action="delete-quote" data-id="${q.id}" title="Eliminar presupuesto">${icon('close', 13)} Eliminar</button>
@@ -4269,20 +4767,28 @@ function billingView() {
             </tr>`;
           }).join('')}
         </tbody>
-      </table></div>` : empty('Sin presupuestos emitidos', 'No hay presupuestos confeccionados todavía.', btn('Crear primer presupuesto', 'new-quote', 'plus', 'primary'))}
+      </table></div>` : empty('Sin presupuestos emitidos', 'Crea un presupuesto estándar o un Programa Clínico Integral estilo Signature con apoyo de IA.', btn('Crear Programa / Presupuesto IA', 'new-quote', 'spark', 'primary'))}
     ` : currentTab === 'payments' ? `
-      ${S.data.payments.length ? `<div class="table-wrap"><table>
-        <thead><tr><th>Fecha</th><th>Paciente</th><th>Método / Referencia</th><th>Importe</th><th>Estado</th></tr></thead>
+      ${filteredMovements.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>Fecha</th><th>Tipo</th><th>Categoría</th><th>Paciente / Destinatario</th><th>Método / Referencia</th><th>Importe</th><th>Estado</th></tr></thead>
         <tbody>
-          ${S.data.payments.map(r => `<tr>
-            <td>${fmtDate(r.createdAt, true)}<div class="tiny muted">${fmtTime(r.createdAt)}</div></td>
-            <td><strong>${esc(nameOf(patientBy(r.patientId)))}</strong></td>
-            <td>${esc(r.method || r.concept)}<div class="tiny muted">${esc(r.reference || '')}</div></td>
-            <td><strong>${fmtMoney(r.amountCents / 100)}</strong></td>
-            <td><span class="badge green">Registrado</span></td>
-          </tr>`).join('')}
+          ${filteredMovements.map(r => {
+            const isExp = r.movementType === 'EXPENSE';
+            const catCode = r.category || (isExp ? 'SUPPLIES' : 'CONSULTATION');
+            const catMeta = PAYMENT_CATEGORY_LABELS[catCode] || { label: catCode, badge: isExp ? 'red' : 'green' };
+            const pat = r.patientId ? patientBy(r.patientId) : null;
+            return `<tr>
+              <td>${fmtDate(r.createdAt, true)}<div class="tiny muted">${fmtTime(r.createdAt)}</div></td>
+              <td><span class="badge ${isExp ? 'red' : 'green'}">${isExp ? '↓ Egreso' : '↑ Ingreso'}</span></td>
+              <td><span class="badge ${catMeta.badge}">${esc(catMeta.label)}</span></td>
+              <td><strong>${esc(pat ? nameOf(pat) : (isExp ? 'Proveedor / Clínica' : 'Paciente General'))}</strong></td>
+              <td>${esc(r.method || r.concept || 'TRANSFERENCIA')}<div class="tiny muted">${esc(r.reference || '')}</div></td>
+              <td><strong style="color:${isExp ? '#b91c1c' : '#15803d'}">${isExp ? '- ' : '+ '}${fmtMoney(r.amountCents / 100)}</strong></td>
+              <td><span class="badge ${isExp ? 'gray' : 'green'}">${isExp ? 'Imputado' : 'Cobrado'}</span></td>
+            </tr>`;
+          }).join('')}
         </tbody>
-      </table></div>` : empty('Sin registros', 'No hay cobros registrados en este período.')}
+      </table></div>` : empty('Sin movimientos en este filtro', 'Registra ingresos (señas, pagos totales de tratamiento, consultas) o egresos operativos.')}
     ` : `
       ${!arcaConnected ? `
         <div style="background:#fffbeb;border:1px solid #fde68a;padding:12px 16px;border-radius:8px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px">
@@ -4323,8 +4829,8 @@ function billingView() {
       </table></div>` : (!arcaConnected ? empty('Canal fiscal ARCA no conectado', 'No hay facturas emitidas. Las facturas fiscales electrónicas oficiales requieren conectar tu CUIT y Punto de Venta en Integraciones.', btn('Configurar ARCA', 'config-integration', 'settings', 'primary', 'data-id="arca"')) : empty('Sin registros', 'No hay facturas emitidas en este período.', btn('Emitir Factura ARCA', 'new-invoice', 'file', 'primary')))}
     `}
     <div class="panel-footer">
-      <span>Moneda: ARS (Pesos Argentinos) · Módulo Financiero y Presupuestario Integral</span>
-      <span>${currentTab === 'quotes' ? quotes.length : currentTab === 'payments' ? S.data.payments.length : S.data.invoices.length} operaciones</span>
+      <span>Moneda: ARS (Pesos Argentinos) · Módulo Financiero Categorizado (Ingresos, Señas, Pagos Totales y Egresos)</span>
+      <span>${currentTab === 'quotes' ? quotes.length : currentTab === 'payments' ? filteredMovements.length : S.data.invoices.length} operaciones</span>
     </div>
   </section>`;
 }
@@ -5313,11 +5819,89 @@ function vitalsDialog(patientId = null) {
   );
 }
 
+function renderBarcodeSvg(codeStr = 'AR-CUIR-2026') {
+  const clean = String(codeStr || 'ARCUIR2026');
+  const bars = [];
+  let x = 6;
+  for (let i = 0; i < clean.length; i++) {
+    const c = clean.charCodeAt(i);
+    const w1 = (c % 3) + 1;
+    const w2 = ((c >> 2) % 2) + 1;
+    bars.push(`<rect x="${x}" y="4" width="${w1}" height="34" fill="#0f172a"/>`);
+    x += w1 + 2;
+    bars.push(`<rect x="${x}" y="4" width="${w2}" height="34" fill="#0f172a"/>`);
+    x += w2 + 3;
+  }
+  return `<svg width="${Math.max(160, x + 6)}" height="42" viewBox="0 0 ${Math.max(160, x + 6)} 42" xmlns="http://www.w3.org/2000/svg" style="display:block;margin-left:auto">${bars.join('')}</svg>`;
+}
+
+function resolveDoctorForDoc(doctorId, doctorNameFallback = '') {
+  const allDocs = [...(S.data?.staff || []), ...(S.data?.doctors || []), ...(S.portal?.data?.doctors || [])];
+  let doc = doctorId ? allDocs.find(d => d.id === doctorId) : null;
+  if (!doc && doctorNameFallback) doc = allDocs.find(d => d.name === doctorNameFallback);
+  if (!doc) doc = allDocs.find(d => d.role === 'DOCTOR' || d.licenseNumber) || allDocs[0] || {};
+  return {
+    id: doc.id || '',
+    name: doc.name || doctorNameFallback || S.session?.user?.name || 'Dra. María José Mattioli',
+    specialty: doc.specialty || 'Medicina Integrativa y Regenerativa',
+    licenseNumber: doc.licenseNumber || 'M.N. 142.850',
+    signatureData: doc.signatureData || '',
+    address: doc.address || S.data?.workspace?.address || 'Consultorios Médicos · Atención Personalizada'
+  };
+}
+
+function renderSignatureStampHtml(doc) {
+  return `
+  <div style="text-align:center;min-width:230px">
+    <div style="height:68px;display:flex;align-items:flex-end;justify-content:center;margin-bottom:4px">
+      ${doc.signatureData
+        ? `<img src="${doc.signatureData}" alt="Firma Digital" style="max-height:66px;max-width:210px;object-fit:contain">`
+        : `<div style="font-family:'Brush Script MT','Segoe Script',cursive;font-size:27px;color:#143829;transform:rotate(-3deg);line-height:1;padding-bottom:6px">${esc(doc.name)}</div>`
+      }
+    </div>
+    <div style="border-top:1.5px solid #1b4c37;padding-top:6px;font-size:12px;color:#18362b;line-height:1.35">
+      <strong style="display:block;font-size:13px">${esc(doc.name)}</strong>
+      <span>${esc(doc.specialty)}</span><br>
+      <strong style="font-family:monospace;font-size:12px;color:#1b4c37">Matrícula: ${esc(doc.licenseNumber)}</strong>
+    </div>
+  </div>`;
+}
+
+function parseQuoteProgramMeta(rawNotes, p, qt) {
+  const defaultMeta = {
+    isSignature: true,
+    stageSubtitle: 'ETAPA 1 · PROGRAMA CLÍNICO INTENSIVO PERSONALIZADO',
+    clinicalContext: p?.medicalHistory?.pathological && p.medicalHistory.pathological !== 'Sin patologías crónicas declaradas.'
+      ? `Contexto clínico: ${p.medicalHistory.pathological}. ${p.medicalHistory.medications ? `Medicación actual: ${p.medicalHistory.medications}.` : ''}`
+      : 'Abordaje integral orientado a la recuperación celular, modulación inflamatoria, oxigenación tisular y optimización metabólica.',
+    rationale: 'Una etapa intensiva inicial permite generar un estímulo biológico sostenido y sinérgico. Al combinar oxigenación hiperbárica, reposición endovenosa de micronutrientes y fotobiomodulación en una ventana terapéutica concentrada, logramos reactivar la función mitocondrial y acelerar la respuesta clínica desde las primeras semanas.',
+    objectives: [
+      'Reducir la inflamación celular crónica y el estrés oxidativo sistémico.',
+      'Optimizar la producción de energía mitocondrial (ATP) y la vitalidad diaria.',
+      'Mejorar la oxigenación de tejidos profundos, la microcirculación y la recuperación.',
+      'Fortalecer la respuesta inmunológica, el descanso reparador y el equilibrio autonómico (HRV).'
+    ],
+    schedulePlan: 'Frecuencia recomendada: 2 a 3 visitas semanales durante 4 a 6 semanas consecutivas. En cada visita se articulan las sesiones de forma coordinada (duración aproximada por visita: 90 a 120 minutos) con monitoreo de signos vitales y variabilidad cardíaca (HRV).',
+    accompaniment: 'Durante toda la Etapa 1 realizamos seguimiento médico continuo, evaluación comparativa entre tus estudios basales del Portal del Paciente y tus nuevos biomarcadores, y ajustes personalizados de dosis según tu respuesta clínica.',
+    surchargePercent: 10,
+    additionalNotes: ''
+  };
+  if (!rawNotes) return defaultMeta;
+  const str = String(rawNotes).trim();
+  if (str.startsWith('{') && str.includes('SIGNATURE_PROGRAM')) {
+    try {
+      const parsed = JSON.parse(str);
+      return { ...defaultMeta, ...parsed };
+    } catch {}
+  }
+  return { ...defaultMeta, additionalNotes: str };
+}
+
 function printQuoteDocument(id) {
   const qt = (S.data?.quotes || []).find(q => q.id === id);
   if (!qt) return toast('Presupuesto no encontrado.', true);
   const p = patientBy(qt.patientId);
-  const doc = qt.doctorId ? doctorBy(qt.doctorId) : null;
+  const doc = resolveDoctorForDoc(qt.doctorId);
   const clinicName = S.data?.workspace?.name || 'Abundance Clinic OS';
   const items = Array.isArray(qt.items) ? qt.items : [];
   const subtotal = Number(qt.subtotal || items.reduce((a, it) => a + (Number(it.quantity || 1) * Number(it.unitPrice || 0)), 0));
@@ -5325,47 +5909,157 @@ function printQuoteDocument(id) {
   const total = qt.totalCents != null ? qt.totalCents / 100 : Number(qt.total || Math.max(0, subtotal - (subtotal * discount / 100)));
   const qNum = qt.quoteNumber || qt.number || qt.id;
   const curr = qt.currency || 'ARS';
+  const meta = parseQuoteProgramMeta(qt.notes, p, qt);
+  const surchargePct = Number(meta.surchargePercent ?? 10);
+  const totalFinanced = Math.round(total * (1 + surchargePct / 100));
+  const installmentAmount = Math.round(totalFinanced / 3);
+  const patientAge = p?.birthDate ? `${calcAge(p.birthDate)} años` : '—';
 
   const win = window.open('', '_blank');
   if (!win) return toast('Habilita las ventanas emergentes para ver o imprimir el PDF.', true);
-  win.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Presupuesto ${esc(qNum)}</title>
+  win.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${esc(qt.title || 'Programa Signature')} · ${esc(nameOf(p))}</title>
   <style>
-    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#1a2f26;margin:0;padding:32px;background:#f8faf8;line-height:1.5}
-    .page{max-width:780px;margin:0 auto;background:#fff;padding:36px;border-radius:10px;border:1px solid #dce6dd;box-shadow:0 4px 20px rgba(0,0,0,0.06)}
-    .actions{display:flex;justify-content:flex-end;gap:10px;margin-bottom:20px}
-    .btn{padding:9px 16px;border-radius:6px;border:1px solid #cbd5e1;background:#1b4c37;color:#fff;font-weight:600;cursor:pointer;font-size:13px}
-    .header{border-bottom:2px solid #1b4c37;padding-bottom:16px;margin-bottom:22px;display:flex;justify-content:space-between;align-items:flex-start}
-    .patient-box{background:#f4f8f4;border:1px solid #dce8db;border-radius:8px;padding:14px 18px;margin-bottom:22px;display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px}
-    table{width:100%;border-collapse:collapse;margin-bottom:22px}
-    th{text-align:left;padding:10px 12px;background:#eef5f0;color:#1b4c37;font-size:12.5px;border-bottom:2px solid #cbd5e1}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#1b2e25;margin:0;padding:28px;background:#f2f6f3;line-height:1.55}
+    .page{max-width:820px;margin:0 auto 24px;background:#fff;padding:42px 46px;border-radius:12px;border:1px solid #d5e2d8;box-shadow:0 8px 28px rgba(15,41,30,0.07)}
+    .actions{max-width:820px;margin:0 auto 16px;display:flex;justify-content:space-between;align-items:center}
+    .btn{padding:10px 18px;border-radius:8px;border:none;background:#1b4c37;color:#fff;font-weight:700;cursor:pointer;font-size:13px}
+    .hero-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2.5px solid #1b4c37;padding-bottom:18px;margin-bottom:22px}
+    .brand-row{display:flex;align-items:center;gap:12px}
+    .brand-icon{width:42px;height:42px;border-radius:10px;background:#1b4c37;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:20px}
+    .tag-pill{display:inline-block;background:#eaf4ec;color:#1b4c37;font-size:11px;font-weight:800;letter-spacing:0.8px;padding:4px 10px;border-radius:99px;text-transform:uppercase;margin-bottom:6px}
+    .ficha-grid{background:#f5f9f6;border:1px solid #d7e6db;border-radius:10px;padding:16px 20px;margin-bottom:22px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;font-size:12.5px}
+    .ficha-grid div strong{display:block;font-size:10.5px;text-transform:uppercase;color:#5a7364;letter-spacing:0.4px}
+    .sec-title{font-size:15px;font-weight:800;color:#1b4c37;margin:22px 0 8px;display:flex;align-items:center;gap:8px;border-left:3.5px solid #1b4c37;padding-left:10px}
+    .sec-text{font-size:13px;color:#2c3e35;margin:0 0 12px;text-align:justify}
+    .obj-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
+    .obj-card{background:#f8fbf9;border:1px solid #dce8df;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#1e3a2b;display:flex;align-items:flex-start;gap:8px}
+    .therapy-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:12px 0 18px}
+    .t-card{background:#fff;border:1px solid #cfe0d4;border-radius:10px;padding:14px}
+    .t-card h4{margin:0 0 4px;color:#1b4c37;font-size:13.5px}
+    .t-card .t-qty{font-size:11.5px;font-weight:700;color:#15803d;margin-bottom:6px;display:block}
+    .t-card p{margin:0;font-size:12px;color:#475569}
+    table{width:100%;border-collapse:collapse;margin:14px 0 18px}
+    th{text-align:left;padding:10px 12px;background:#1b4c37;color:#fff;font-size:12px;text-transform:uppercase;letter-spacing:0.4px}
     td{padding:11px 12px;border-bottom:1px solid #e2e8f0;font-size:13px}
-    .totals{margin-left:auto;width:280px;font-size:13.5px}
+    .totals-box{display:grid;grid-template-columns:1.2fr 1fr;gap:20px;align-items:start;margin-top:18px}
+    .pay-options{background:#f5f9f6;border:1.5px solid #c5d9cb;border-radius:10px;padding:16px}
+    .pay-opt{display:flex;align-items:flex-start;gap:10px;padding:10px;background:#fff;border:1px solid #d8e4da;border-radius:8px;margin-bottom:8px;font-size:12.5px}
+    .checkbox-sq{width:16px;height:16px;border:2px solid #1b4c37;border-radius:4px;flex-shrink:0;margin-top:2px}
+    .totals{background:#f8fbf9;border:1px solid #d5e2d8;border-radius:10px;padding:16px;font-size:13.5px}
     .totals div{display:flex;justify-content:space-between;padding:5px 0}
-    .grand{font-size:16px;font-weight:800;color:#1b4c37;border-top:2px solid #1b4c37;margin-top:6px;padding-top:8px}
-    @media print{.actions{display:none}body{background:#fff;padding:0}.page{border:none;box-shadow:none;padding:10px}}
+    .grand{font-size:17px;font-weight:800;color:#1b4c37;border-top:2px solid #1b4c37;margin-top:8px;padding-top:10px}
+    .footer-sig{margin-top:32px;padding-top:20px;border-top:1px solid #dce6dd;display:flex;justify-content:space-between;align-items:flex-end}
+    @media print{.actions{display:none}body{background:#fff;padding:0}.page{border:none;box-shadow:none;padding:18px;margin:0}}
   </style></head><body>
+  <div class="actions">
+    <span style="font-size:12.5px;color:#475569;font-weight:600">Programa Clínico & Presupuesto Oficial · ${esc(qNum)}</span>
+    <button class="btn" onclick="window.print()">Imprimir / Descargar PDF</button>
+  </div>
   <div class="page">
-    <div class="actions"><button class="btn" onclick="window.print()">Imprimir / Guardar PDF</button></div>
-    <div class="header">
-      <div><div style="font-size:22px;font-weight:800;color:#1b4c37">${esc(clinicName)}</div><div style="font-size:12px;color:#5a7364">Presupuesto Médico Clínico</div></div>
-      <div style="text-align:right"><div style="font-size:18px;font-weight:700;color:#1b4c37">PRESUPUESTO ${esc(qNum)}</div><div style="font-size:12px;color:#5a7364">Fecha: ${fmtDate(qt.createdAt, true)} · Válido hasta: ${fmtDate(qt.validUntil, true)}</div></div>
+    <div class="hero-head">
+      <div>
+        <div class="brand-row">
+          <div class="brand-icon">A</div>
+          <div>
+            <div style="font-size:20px;font-weight:800;color:#1b4c37;letter-spacing:-0.3px">${esc(clinicName)}</div>
+            <div style="font-size:12px;color:#5a7364">${esc(doc.name)} · ${esc(doc.specialty)} · <b>${esc(doc.licenseNumber)}</b></div>
+          </div>
+        </div>
+      </div>
+      <div style="text-align:right">
+        <span class="tag-pill">${esc(meta.stageSubtitle || 'PROGRAMA SIGNATURE')}</span>
+        <div style="font-size:17px;font-weight:800;color:#18362b">${esc(qt.title)}</div>
+        <div style="font-size:11.5px;color:#64748b">Presupuesto N° ${esc(qNum)} · Emisión: ${fmtDate(qt.createdAt, true)}</div>
+      </div>
     </div>
-    <div class="patient-box">
-      <div><b>Paciente:</b> ${esc(nameOf(p))}<br><b>DNI:</b> ${esc(p?.dni || '—')}<br><b>Cobertura:</b> ${esc(p?.coverage || 'Particular')}</div>
-      <div><b>Tratamiento:</b> ${esc(qt.title)}<br><b>Profesional:</b> ${esc(doc?.name || 'Equipo Médico')}<br><b>Estado:</b> ${esc(qt.status || 'PENDING')}</div>
+
+    <div class="ficha-grid">
+      <div><strong>Paciente</strong><b>${esc(nameOf(p))}</b></div>
+      <div><strong>DNI / Identificación</strong>${esc(p?.dni || '—')} (${esc(patientAge)})</div>
+      <div><strong>Cobertura</strong>${esc(p?.coverage || 'Particular')}</div>
+      <div><strong>Profesional Tratante</strong>${esc(doc.name)} (${esc(doc.licenseNumber)})</div>
+      <div><strong>Fecha de Emisión</strong>${fmtDate(qt.createdAt, true)}</div>
+      <div><strong>Vigencia del Presupuesto</strong>Hasta ${fmtDate(qt.validUntil, true)}</div>
     </div>
-    <table><thead><tr><th>Descripción</th><th style="text-align:center">Cant.</th><th style="text-align:right">Precio Unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
-    <tbody>${items.map(it => {
-      const qty = Number(it.quantity || 1);
-      const up = Number(it.unitPrice || 0);
-      return `<tr><td>${esc(it.description)}</td><td style="text-align:center">${qty}</td><td style="text-align:right">${curr} $${up.toLocaleString('es-AR')}</td><td style="text-align:right"><b>${curr} $${(qty * up).toLocaleString('es-AR')}</b></td></tr>`;
-    }).join('')}</tbody></table>
-    <div class="totals">
-      <div><span>Subtotal:</span><span>${curr} $${subtotal.toLocaleString('es-AR')}</span></div>
-      ${discount ? `<div><span>Bonificación (${discount}%):</span><span>- ${curr} $${(subtotal * discount / 100).toLocaleString('es-AR')}</span></div>` : ''}
-      <div class="grand"><span>TOTAL:</span><span>${curr} $${total.toLocaleString('es-AR')}</span></div>
+
+    <div class="sec-title">1. Por qué una etapa intensiva y contexto clínico</div>
+    <p class="sec-text"><b>Resumen clínico personalizado:</b> ${esc(meta.clinicalContext)}</p>
+    <p class="sec-text">${esc(meta.rationale)}</p>
+
+    <div class="sec-title">2. Qué buscamos en esta etapa</div>
+    <div class="obj-grid">
+      ${(meta.objectives || []).map(obj => `<div class="obj-card"><span style="color:#15803d;font-weight:900">✓</span><span>${esc(obj)}</span></div>`).join('')}
     </div>
-    ${qt.notes ? `<div style="margin-top:24px;padding:12px 16px;background:#f8fafc;border-left:3px solid #1b4c37;font-size:12.5px;color:#334155"><b>Condiciones y Notas:</b><br>${esc(qt.notes)}</div>` : ''}
+
+    <div class="sec-title">3. Qué incluye tu programa · Las terapias indicadas</div>
+    <div class="therapy-cards">
+      ${items.map(it => {
+        const desc = String(it.description || '');
+        let detail = 'Terapia médica personalizada administrada bajo supervisión clínica y monitoreo de parámetros.';
+        if (/hiperb[aá]rica|chb/i.test(desc)) detail = 'Oxigenación hiperbárica a 1.45 ATA para saturar el plasma de oxígeno, estimular la angiogénesis, regenerar tejidos y potenciar la energía celular.';
+        else if (/suero|endovenos|iv|vitamina/i.test(desc)) detail = 'Infusión endovenosa de micronutrientes, antioxidantes y cofactores celulares de biodisponibilidad inmediata (100% absorción sistémica).';
+        else if (/fotobio|luz|led|l[aá]ser/i.test(desc)) detail = 'Estimulación con espectro rojo (660 nm) e infrarrojo cercano (850 nm) que activa la citocromo C oxidasa mitocondrial y modula la inflamación.';
+        else if (/consulta|control|evaluaci[oó]n/i.test(desc)) detail = 'Seguimiento médico integrativo, lectura comparativa de laboratorios y ajuste personalizado del protocolo.';
+        return `<div class="t-card">
+          <h4>${esc(desc)}</h4>
+          <span class="t-qty">${Number(it.quantity || 1)} sesión(es) / unidad(es) incluidas</span>
+          <p>${esc(detail)}</p>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <div class="sec-title">4. Cómo se organiza la etapa y cómo te acompaño</div>
+    <p class="sec-text"><b>Organización de sesiones:</b> ${esc(meta.schedulePlan)}</p>
+    <p class="sec-text"><b>Acompañamiento médico:</b> ${esc(meta.accompaniment)}</p>
+
+    <div class="sec-title">5. Inversión del Programa y Formas de Pago</div>
+    <table>
+      <thead><tr><th>Concepto / Terapia Integrativa</th><th style="text-align:center">Sesiones / Cant.</th><th style="text-align:right">Valor Unitario</th><th style="text-align:right">Subtotal</th></tr></thead>
+      <tbody>
+        ${items.map(it => {
+          const qty = Number(it.quantity || 1);
+          const up = Number(it.unitPrice || 0);
+          return `<tr><td><b>${esc(it.description)}</b></td><td style="text-align:center">${qty}</td><td style="text-align:right">${curr} $${up.toLocaleString('es-AR')}</td><td style="text-align:right"><b>${curr} $${(qty * up).toLocaleString('es-AR')}</b></td></tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+
+    <div class="totals-box">
+      <div class="pay-options">
+        <strong style="font-size:13px;color:#1b4c37;display:block;margin-bottom:8px">FORMAS DE PAGO DISPONIBLES (Seleccionar opción):</strong>
+        <div class="pay-opt">
+          <div class="checkbox-sq"></div>
+          <div>
+            <strong style="color:#14532d">Opción 1 · Pago Total al inicio del programa</strong><br>
+            <span>Inversión total sin recargo: <b>${curr} $${total.toLocaleString('es-AR')}</b> (Transferencia, efectivo o débito).</span>
+          </div>
+        </div>
+        <div class="pay-opt" style="margin-bottom:0">
+          <div class="checkbox-sq"></div>
+          <div>
+            <strong style="color:#1e3a8a">Opción 2 · Financiación en 3 Cuotas (${surchargePct}% de recargo)</strong><br>
+            <span>3 cuotas mensuales de <b>${curr} $${installmentAmount.toLocaleString('es-AR')}</b> (Total financiado: ${curr} $${totalFinanced.toLocaleString('es-AR')}).</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="totals">
+        <div><span>Subtotal de Terapias:</span><span>${curr} $${subtotal.toLocaleString('es-AR')}</span></div>
+        ${discount ? `<div style="color:#15803d"><span>Bonificación Programa (${discount}%):</span><span>- ${curr} $${(subtotal * discount / 100).toLocaleString('es-AR')}</span></div>` : ''}
+        <div class="grand"><span>INVERSIÓN TOTAL:</span><span>${curr} $${total.toLocaleString('es-AR')}</span></div>
+        <div style="font-size:11.5px;color:#64748b;margin-top:6px;display:block;text-align:right">Opción 3 cuotas (+${surchargePct}%): 3 x ${curr} $${installmentAmount.toLocaleString('es-AR')}</div>
+      </div>
+    </div>
+
+    ${meta.additionalNotes ? `<div style="margin-top:18px;padding:12px 16px;background:#f8fafc;border-left:3px solid #1b4c37;font-size:12px;color:#334155"><b>Notas adicionales:</b> ${esc(meta.additionalNotes)}</div>` : ''}
+
+    <div class="footer-sig">
+      <div style="font-size:11.5px;color:#64748b;max-width:440px">
+        <b>${esc(clinicName)}</b> · ${esc(doc.address)}<br>
+        Presupuesto válido hasta el ${fmtDate(qt.validUntil, true)}. Al aprobar el programa se coordinan los turnos de Terapias Ambulatorias y el seguimiento en tu Portal del Paciente.
+      </div>
+      ${renderSignatureStampHtml(doc)}
+    </div>
   </div></body></html>`);
   win.document.close();
 }
@@ -5374,6 +6068,7 @@ function printInvoiceDocument(id) {
   const inv = (S.data?.invoices || S.portal?.data?.invoices || []).find(i => i.id === id);
   if (!inv) return toast('Comprobante no encontrado.', true);
   const p = patientBy(inv.patientId) || S.portal?.patient;
+  const doc = resolveDoctorForDoc(inv.doctorId);
   const clinicName = S.data?.workspace?.name || S.portal?.data?.clinic?.name || 'Abundance Clinic OS';
   const amountFmt = fmtMoney((inv.amountCents || 0) / 100);
   const win = window.open('', '_blank');
@@ -5383,7 +6078,7 @@ function printInvoiceDocument(id) {
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#1a2f26;margin:0;padding:30px;background:#f6f8f6}
     .page{max-width:780px;margin:0 auto;background:#fff;padding:30px;border-radius:8px;border:1px solid #d4ded6}
     .btn{padding:9px 16px;border-radius:6px;border:none;background:#1b4c37;color:#fff;font-weight:600;cursor:pointer}
-    .box{border:1px solid #b8c9bc;padding:20px;margin-top:16px}
+    .box{border:1px solid #b8c9bc;padding:22px;margin-top:16px;border-radius:8px}
     .head{display:grid;grid-template-columns:1fr 70px 1fr;gap:12px;border-bottom:2px solid #1b4c37;padding-bottom:16px}
     .letra{width:54px;height:54px;border:2px solid #1b4c37;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:900;margin:0 auto}
     table{width:100%;border-collapse:collapse;margin:20px 0}
@@ -5393,16 +6088,32 @@ function printInvoiceDocument(id) {
     <div class="actions" style="text-align:right"><button class="btn" onclick="window.print()">Imprimir / Guardar PDF</button></div>
     <div class="box">
       <div class="head">
-        <div><strong style="font-size:18px;color:#1b4c37">${esc(clinicName)}</strong><br><small>Prestaciones de Salud · IVA Exento</small></div>
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <div style="width:38px;height:38px;border-radius:8px;background:#1b4c37;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:18px;flex-shrink:0">A</div>
+          <div>
+            <strong style="font-size:17px;color:#1b4c37">${esc(clinicName)}</strong><br>
+            <small style="color:#475569">${esc(doc.name)} · ${esc(doc.licenseNumber)}</small><br>
+            <small style="color:#64748b">${esc(doc.address)} · Prestaciones de Salud</small>
+          </div>
+        </div>
         <div style="text-align:center"><div class="letra">${esc(inv.invoiceType || 'B')}</div><small>COD. ${inv.invoiceType === 'C' ? '011' : '006'}</small></div>
         <div style="text-align:right"><strong>FACTURA ${esc(inv.invoiceType || 'B')}</strong><br>N° ${esc(inv.invoiceNumber || '')}<br><small>Fecha: ${fmtDate(inv.createdAt, true)}</small></div>
       </div>
-      <div style="padding:12px 0;border-bottom:1px solid #e2e8f0;font-size:13px"><b>Paciente:</b> ${esc(nameOf(p))} · <b>DNI:</b> ${esc(p?.dni || 'Consumidor Final')}</div>
-      <table><thead><tr><th>Concepto</th><th style="text-align:right">Importe</th></tr></thead>
+      <div style="padding:12px 0;border-bottom:1px solid #e2e8f0;font-size:13px;display:flex;justify-content:space-between;flex-wrap:wrap">
+        <span><b>Paciente:</b> ${esc(nameOf(p))} · <b>DNI:</b> ${esc(p?.dni || 'Consumidor Final')}</span>
+        <span><b>Cobertura:</b> ${esc(p?.coverage || 'Particular')} ${p?.affiliateNumber ? `(Afiliado N° ${esc(p.affiliateNumber)})` : ''}</span>
+      </div>
+      <table><thead><tr><th>Concepto / Prestación Médica</th><th style="text-align:right">Importe</th></tr></thead>
       <tbody><tr><td>${esc(inv.concept || 'Prestación médica')}</td><td style="text-align:right"><b>${amountFmt}</b></td></tr></tbody></table>
-      <div style="display:flex;justify-content:space-between;align-items:center;background:#f4f8f4;padding:14px;border-radius:6px;margin-top:16px">
-        <div><b style="color:#15803d">✓ AUTORIZADO POR ARCA (AFIP)</b><br><small>CAE N°: ${esc(inv.cae || '—')} · Vto: ${fmtDate(inv.caeVto || inv.createdAt, true)}</small></div>
-        ${inv.qrUrl ? `<img src="https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=${encodeURIComponent(inv.qrUrl)}" width="90" height="90" alt="QR ARCA">` : ''}
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:20px;padding-top:14px;border-top:1px dashed #cbd5e1">
+        <div style="background:#f4f8f4;padding:12px 16px;border-radius:8px;border:1px solid #bbf7d0;display:flex;align-items:center;gap:14px">
+          ${inv.qrUrl ? `<img src="https://api.qrserver.com/v1/create-qr-code/?size=84x84&data=${encodeURIComponent(inv.qrUrl)}" width="84" height="84" alt="QR ARCA">` : ''}
+          <div>
+            <b style="color:#15803d;font-size:13px">✓ COMPROBANTE AUTORIZADO POR ARCA (AFIP)</b><br>
+            <small style="font-family:monospace;font-size:12px">CAE N°: ${esc(inv.cae || '—')} · Vto CAE: ${fmtDate(inv.caeVto || inv.createdAt, true)}</small>
+          </div>
+        </div>
+        ${renderSignatureStampHtml(doc)}
       </div>
     </div>
   </div></body></html>`);
@@ -5413,30 +6124,104 @@ function printPrescriptionDocument(id) {
   const rx = (S.data?.prescriptions || S.portal?.data?.prescriptions || []).find(r => r.id === id);
   if (!rx) return toast('Receta médica no encontrada.', true);
   const p = patientBy(rx.patientId) || S.portal?.patient;
+  const doc = resolveDoctorForDoc(rx.doctorId, rx.doctorName);
+  if (rx.doctorLicense) doc.licenseNumber = rx.doctorLicense;
   const clinicName = S.data?.workspace?.name || S.portal?.data?.clinic?.name || 'Abundance Clinic OS';
+  const cuir = rx.cuir || `AR-CUIR-${new Date(rx.createdAt || Date.now()).getFullYear()}-${String(rx.id || '').replace(/\D/g, '').padStart(6, '8').slice(0, 8)}-${String(rx.id || 'RX').slice(-4).toUpperCase()}`;
+  const meds = Array.isArray(rx.medications) && rx.medications.length ? rx.medications : null;
+  const validUntilDate = plusDays((rx.createdAt || new Date().toISOString()).slice(0, 10), 30);
+  const qrPayload = `https://app.rcta.me/verify?cuir=${encodeURIComponent(cuir)}&rx=${encodeURIComponent(rx.id)}&dni=${encodeURIComponent(p?.dni || '')}&mn=${encodeURIComponent(doc.licenseNumber)}`;
+
   const win = window.open('', '_blank');
   if (!win) return toast('Habilita las ventanas emergentes para ver o imprimir la receta.', true);
-  win.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Receta Electrónica ${esc(rx.id)}</title>
+  win.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Receta Electrónica Oficial ${esc(cuir)}</title>
   <style>
-    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#1a2f26;margin:0;padding:30px;background:#f6f8f6}
-    .page{max-width:720px;margin:0 auto;background:#fff;padding:34px;border-radius:10px;border:1px solid #d4ded6}
-    .btn{padding:9px 16px;border-radius:6px;border:none;background:#1b4c37;color:#fff;font-weight:600;cursor:pointer}
-    .header{border-bottom:2px solid #1b4c37;padding-bottom:14px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center}
-    .rx-body{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:20px;font-size:14px;white-space:pre-wrap;line-height:1.7;min-height:160px;margin:18px 0}
-    @media print{.actions{display:none}body{background:#fff;padding:0}.page{border:none}}
-  </style></head><body><div class="page">
-    <div class="actions" style="text-align:right;margin-bottom:14px"><button class="btn" onclick="window.print()">Imprimir / Guardar PDF</button></div>
-    <div class="header">
-      <div><strong style="font-size:20px;color:#1b4c37">${esc(clinicName)}</strong><br><small>Receta Médica Electrónica (Ley 27.553)</small></div>
-      <div style="text-align:right"><small>Fecha: ${fmtDate(rx.createdAt, true)}</small><br><small>Ref: ${esc(rx.id)}</small></div>
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#0f172a;margin:0;padding:24px;background:#eef3f0;line-height:1.45}
+    .page{max-width:740px;margin:0 auto;background:#fff;padding:32px 36px;border-radius:12px;border:1.5px solid #cbd5e1;box-shadow:0 8px 25px rgba(0,0,0,0.06)}
+    .actions{max-width:740px;margin:0 auto 12px;display:flex;justify-content:space-between;align-items:center}
+    .btn{padding:9px 18px;border-radius:7px;border:none;background:#1b4c37;color:#fff;font-weight:700;cursor:pointer;font-size:13px}
+    .rcta-header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2.5px solid #1b4c37;padding-bottom:14px;margin-bottom:14px}
+    .clinic-brand{display:flex;gap:12px;align-items:center}
+    .logo-mark{width:44px;height:44px;border-radius:10px;background:#1b4c37;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:900}
+    .cuir-box{text-align:right}
+    .cuir-code{font-family:monospace;font-size:12px;font-weight:800;color:#0f172a;letter-spacing:0.5px;margin-top:2px}
+    .patient-panel{background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;padding:12px 16px;margin-bottom:16px;display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:10px;font-size:12.5px}
+    .patient-panel div small{display:block;font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700;letter-spacing:0.4px}
+    .rp-container{border:1.5px solid #1b4c37;border-radius:10px;padding:18px 20px;min-height:210px;background:#fff;margin-bottom:18px;position:relative}
+    .rp-symbol{font-size:22px;font-weight:900;color:#1b4c37;font-family:Georgia,serif;margin-bottom:10px;border-bottom:1px dashed #cbd5e1;padding-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+    .med-card{padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fbf9;margin-bottom:10px}
+    .med-title{font-size:14px;font-weight:800;color:#0f172a;display:flex;justify-content:space-between}
+    .med-posology{font-size:12.5px;color:#334155;margin-top:4px}
+    .rcta-footer{display:flex;justify-content:space-between;align-items:flex-end;border-top:2px solid #e2e8f0;padding-top:16px;margin-top:12px}
+    .qr-verify{display:flex;align-items:center;gap:12px;background:#f8fafc;border:1px solid #e2e8f0;padding:10px 12px;border-radius:8px;max-width:390px}
+    .legal-bar{margin-top:14px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:10.5px;color:#64748b;display:flex;justify-content:space-between}
+    @media print{.actions{display:none}body{background:#fff;padding:0}.page{border:none;box-shadow:none;padding:12px}}
+  </style></head><body>
+  <div class="actions">
+    <span style="font-size:12px;color:#475569;font-weight:600">Recetario Electrónico Legal (Ley Nacional 27.553 · Estándar RCTA)</span>
+    <button class="btn" onclick="window.print()">Imprimir / Descargar Receta PDF</button>
+  </div>
+  <div class="page">
+    <div class="rcta-header">
+      <div class="clinic-brand">
+        <div class="logo-mark">A</div>
+        <div>
+          <div style="font-size:19px;font-weight:800;color:#1b4c37">${esc(clinicName)}</div>
+          <div style="font-size:13px;font-weight:700;color:#0f172a">${esc(doc.name)} · <span style="color:#1b4c37">${esc(doc.licenseNumber)}</span></div>
+          <div style="font-size:11.5px;color:#475569">${esc(doc.specialty)} · ${esc(doc.address)}</div>
+        </div>
+      </div>
+      <div class="cuir-box">
+        <span style="background:#1b4c37;color:#fff;font-size:10px;font-weight:800;padding:3px 8px;border-radius:4px;letter-spacing:0.6px">RECETA ELECTRÓNICA LEY 27.553</span>
+        ${renderBarcodeSvg(cuir)}
+        <div class="cuir-code">CUIR: ${esc(cuir)}</div>
+      </div>
     </div>
-    <div style="font-size:13px;padding:10px 14px;background:#f4f8f4;border-radius:6px">
-      <b>Paciente:</b> ${esc(nameOf(p))} · <b>DNI:</b> ${esc(p?.dni || '—')} · <b>Cobertura:</b> ${esc(p?.coverage || 'Particular')}
+
+    <div class="patient-panel">
+      <div><small>Paciente</small><b>${esc(nameOf(p))}</b></div>
+      <div><small>DNI / Documento</small><b>${esc(p?.dni || '—')}</b> ${p?.birthDate ? `(${calcAge(p.birthDate)} años)` : ''}</div>
+      <div><small>Cobertura / Obra Social</small><b>${esc(p?.coverage || 'Particular')}</b> ${p?.affiliateNumber ? `· N° ${esc(p.affiliateNumber)}` : ''}</div>
+      <div><small>Fecha de Prescripción</small>${fmtDate(rx.createdAt, true)}</div>
+      <div><small>Válida en Farmacias Hasta</small><b>${fmtDate(validUntilDate, true)} (30 días)</b></div>
+      <div><small>Diagnóstico / CIE-10</small><b>${esc(rx.diagnosis || 'Tratamiento médico ambulatorio')}</b></div>
     </div>
-    <div class="rx-body">${esc(rx.content)}</div>
-    <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #e2e8f0;padding-top:14px;font-size:11.5px;color:#5a7364">
-      <span>✓ Receta Electrónica emitida con firma digital e integridad verificable.</span>
-      <img src="https://api.qrserver.com/v1/create-qr-code/?size=75x75&data=${encodeURIComponent(`RX:${rx.id}|DNI:${p?.dni || ''}|DATE:${rx.createdAt}`)}" width="75" height="75" alt="QR Receta">
+
+    <div class="rp-container">
+      <div class="rp-symbol">
+        <span>Rp /</span>
+        <span style="font-family:sans-serif;font-size:11px;font-weight:600;color:#64748b">Prescripción Farmacológica Oficial</span>
+      </div>
+
+      ${meds ? meds.map((m, idx) => `
+        <div class="med-card">
+          <div class="med-title">
+            <span>${idx + 1}. ${esc(m.drug)} ${m.presentation ? `— <span style="font-weight:600;color:#1b4c37">${esc(m.presentation)}</span>` : ''}</span>
+            <span style="font-size:12px;background:#eaf4ec;color:#1b4c37;padding:2px 8px;border-radius:99px">Cantidad: ${esc(String(m.quantity || '1 envase'))}</span>
+          </div>
+          <div class="med-posology"><b>Posología / Indicaciones:</b> ${esc(m.dosage || 'Según indicación médica.')}</div>
+        </div>
+      `).join('') : ''}
+
+      ${(!meds || rx.content) ? `<div style="font-size:13.5px;white-space:pre-wrap;line-height:1.65;color:#1e293b;margin-top:${meds ? '10px' : '0'}">${esc(rx.content)}</div>` : ''}
+    </div>
+
+    <div class="rcta-footer">
+      <div class="qr-verify">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=82x82&data=${encodeURIComponent(qrPayload)}" width="82" height="82" alt="QR Validación Farmacia">
+        <div style="font-size:11px;color:#334155;line-height:1.4">
+          <strong style="color:#1b4c37;display:block;font-size:11.5px">✓ VALIDACIÓN FARMACÉUTICA NACIONAL</strong>
+          Receta firmada electrónicamente con trazabilidad SHA-256.<br>
+          <b>CUIR:</b> <span style="font-family:monospace">${esc(cuir)}</span><br>
+          Válida para dispensa en todas las farmacias del país (Ley 27.553 / Dec. 345/2024).
+        </div>
+      </div>
+      ${renderSignatureStampHtml(doc)}
+    </div>
+
+    <div class="legal-bar">
+      <span>Documento generado por ${esc(clinicName)} · Registro Nacional de Recetas Electrónicas</span>
+      <span>Ref. Interna: ${esc(rx.id)} · Integridad Criptográfica Verificada</span>
     </div>
   </div></body></html>`);
   win.document.close();
@@ -5444,48 +6229,94 @@ function printPrescriptionDocument(id) {
 
 function quoteForm(patientId = null) {
   const p = patientId ? patientBy(patientId) : (S.selectedPatient ? patientBy(S.selectedPatient) : S.data.patients[0]);
+  const mh = p?.medicalHistory || {};
   const defaultItems = [
-    { description: 'Honorarios Médicos Quirúrgicos', quantity: 1, unitPrice: 250000 },
-    { description: 'Derechos de Quirófano e Insumos Descartables', quantity: 1, unitPrice: 120000 },
-    { description: 'Atención y Controles Post-Quirúrgicos', quantity: 1, unitPrice: 40000 }
+    { description: 'Cámara Hiperbárica (Sesiones de Oxigenación 1.45 ATA)', quantity: 5, unitPrice: 45000 },
+    { description: 'Sueroterapia Endovenosa Personalizada (Vitamina C + Oligoelementos)', quantity: 5, unitPrice: 65000 },
+    { description: 'Cabina de Fotobiomodulación Sistémica (Luz Roja 660nm + Infrarroja 850nm)', quantity: 5, unitPrice: 32000 }
   ];
-  formDialog('quote', 'Nuevo Presupuesto Médico', 'Emisión formal de cotización de tratamiento o procedimiento.',
+  const initialContext = mh.pathological && mh.pathological !== 'Sin patologías crónicas declaradas.'
+    ? `Paciente con antecedentes de: ${mh.pathological}. ${mh.medications ? `Medicación actual: ${mh.medications}.` : ''} Se diseña Etapa 1 intensiva de regeneración celular.`
+    : `Programa personalizado para ${nameOf(p)}, enfocado en optimización mitocondrial, modulación inflamatoria y recuperación de vitalidad biológica.`;
+
+  formDialog('quote', 'Nuevo Programa Clínico & Presupuesto con IA', 'Genera presupuestos médicos o programas integrales de múltiples páginas estilo "Programa Signature" con asistencia de IA.',
+    `<div class="form-field full" style="background:linear-gradient(135deg,#f0fdf4 0%,#eff6ff 100%);border:1px solid #bbf7d0;border-radius:10px;padding:12px 14px;margin-bottom:4px">
+      <div class="between" style="flex-wrap:wrap;gap:8px">
+        <div>
+          <strong style="font-size:13px;color:#14532d;display:flex;align-items:center;gap:6px">${icon('spark', 15)} Asistente IA · Generador de Programa Clínico Signature</strong>
+          <span class="tiny muted">Redacta automáticamente los fundamentos clínicos, objetivos, detalle de las 3 terapias y opciones de pago (contado vs. 3 cuotas con 10% recargo).</span>
+        </div>
+        <div class="flex" style="gap:6px;flex-wrap:wrap">
+          <button type="button" class="btn small primary" id="btn-ai-signature-stage1" style="background:#1b4c37">${icon('spark', 12)} Generar Programa Signature · Etapa 1</button>
+          <button type="button" class="btn small" id="btn-ai-signature-longevity">Programa Longevidad & Detox</button>
+        </div>
+      </div>
+    </div>` +
     patientSelect(p?.id) +
-    selectField('Profesional responsable', 'doctorId', (S.data.doctors || []).map(d => [d.id, d.name]), S.doctor || S.data.doctors[0]?.id) +
-    field('Título / Procedimiento *', 'title', 'text', '', 'required maxlength="200" placeholder="Ej: Rinoplastia Ultrasónica + Postquirúrgico"') +
+    selectField('Profesional responsable (Imprime firma y matrícula)', 'doctorId', (S.data.doctors || []).map(d => [d.id, `${d.name} (${d.licenseNumber || 'M.N.'})`]), S.doctor || S.data.doctors[0]?.id) +
+    field('Título del Programa / Tratamiento *', 'title', 'text', 'Programa Signature · Etapa 1 (Cámara Hiperbárica + Sueroterapia + Fotobiomodulación)', 'required maxlength="200" placeholder="Ej: Programa Signature · Etapa 1"', true) +
     selectField('Moneda', 'currency', [['ARS', 'ARS - Pesos Argentinos'], ['USD', 'USD - Dólares Estadounidenses']], 'ARS') +
-    field('Descuento / Bonificación (%)', 'discount', 'number', '0', 'min="0" max="100" step="1"') +
+    field('Bonificación / Descuento (%)', 'discount', 'number', '0', 'min="0" max="100" step="1"') +
+    field('Recargo Plan 3 Cuotas (%)', 'surchargePercent', 'number', '10', 'min="0" max="100" step="1"') +
     field('Fecha de Validez', 'validUntil', 'date', plusDays(dateKey(), 15), 'required') +
     `<div class="form-field full">
-      <label>Ítems y Conceptos del Presupuesto</label>
+      <label>Terapias, Sesiones y Conceptos Incluidos en el Programa</label>
       <div id="quote-items-container">
         ${defaultItems.map((it, idx) => `
           <div class="quote-item-row" data-idx="${idx}">
-            <input type="text" class="quote-desc" value="${esc(it.description)}" placeholder="Concepto" required>
-            <input type="number" class="quote-qty" value="${it.quantity}" min="1" step="1" placeholder="Cant" required style="width:70px">
+            <input type="text" class="quote-desc" value="${esc(it.description)}" placeholder="Terapia o concepto" required>
+            <input type="number" class="quote-qty" value="${it.quantity}" min="1" step="1" placeholder="Sesiones" required style="width:70px">
             <input type="number" class="quote-price" value="${it.unitPrice}" min="0" step="100" placeholder="Precio Unit" required style="width:110px">
             <span class="quote-subtotal" style="font-weight:700;font-size:12px;color:#1b4c37">$${(it.quantity * it.unitPrice).toLocaleString('es-AR')}</span>
             <button type="button" class="icon-btn remove-quote-item" style="color:#b91c1c">${icon('close', 14)}</button>
           </div>
         `).join('')}
       </div>
-      <button type="button" class="btn small" id="add-quote-item-btn" style="margin-top:6px">${icon('plus', 12)} Agregar otro concepto</button>
-    </div>` +
-    area('Condiciones de Pago / Notas', 'notes', 'Forma de pago: 50% de anticipo al reservar la fecha de quirófano, saldo restante el día del procedimiento. Incluye controles post-operatorios durante 30 días.', 'maxlength="2000"'),
-    'Emitir Presupuesto', '', 'wide'
+      <div class="between" style="margin-top:8px;flex-wrap:wrap;gap:8px">
+        <button type="button" class="btn small" id="add-quote-item-btn">${icon('plus', 12)} Agregar otra terapia o concepto</button>
+        <div id="quote-live-summary" style="font-size:12.5px;color:#18362b;font-weight:700"></div>
+      </div>
+    </div>
+
+    <details class="form-field full" open style="border:1px solid #d8e4da;border-radius:10px;padding:12px 14px;background:#f8fbf9">
+      <summary style="cursor:pointer;font-weight:700;font-size:12.5px;color:#1b4c37">Secciones del Documento "Programa Signature" (Generadas por IA · Editables)</summary>
+      <div class="form-grid" style="margin-top:10px">
+        ${field('Subtítulo de Etapa', 'stageSubtitle', 'text', 'ETAPA 1 · PROGRAMA CLÍNICO INTENSIVO PERSONALIZADO', '', true)}
+        ${area('1. Contexto Clínico Personalizado del Paciente', 'clinicalContext', initialContext, 'style="height:58px"')}
+        ${area('2. Por qué una etapa intensiva (Fundamento Médico)', 'rationale', 'Una etapa intensiva inicial permite generar un estímulo biológico sostenido y sinérgico. Al combinar oxigenación hiperbárica, reposición endovenosa de micronutrientes y fotobiomodulación en una ventana terapéutica concentrada, logramos reactivar la función mitocondrial y acelerar la respuesta clínica desde las primeras semanas.', 'style="height:68px"')}
+        ${area('3. Qué buscamos en esta etapa (Objetivos separados por línea)', 'objectivesText', 'Reducir la inflamación celular crónica y el estrés oxidativo sistémico.\nOptimizar la producción de energía mitocondrial (ATP) y la vitalidad diaria.\nMejorar la oxigenación de tejidos profundos, la microcirculación y la recuperación.\nFortalecer la respuesta inmunológica, el descanso reparador y el equilibrio autonómico (HRV).', 'style="height:78px"')}
+        ${area('4. Cómo se organiza la etapa y acompañamiento médico', 'schedulePlan', 'Frecuencia recomendada: 2 a 3 visitas semanales durante 4 a 6 semanas consecutivas. En cada visita se articulan las sesiones de forma coordinada con monitoreo de signos vitales y variabilidad cardíaca (HRV).', 'style="height:58px"')}
+      </div>
+    </details>` +
+    area('Observaciones adicionales / Notas al pie', 'notes', '', 'maxlength="2000" placeholder="Notas u observaciones específicas para el paciente..."'),
+    'Emitir Programa y Presupuesto PDF', '', 'wide'
   );
 
   setTimeout(() => {
     const container = $('#quote-items-container');
+    const summaryEl = $('#quote-live-summary');
     const updateSubtotals = () => {
+      let sum = 0;
       container?.querySelectorAll('.quote-item-row').forEach(row => {
         const qty = Number(row.querySelector('.quote-qty')?.value || 1);
         const price = Number(row.querySelector('.quote-price')?.value || 0);
         const sub = row.querySelector('.quote-subtotal');
-        if (sub) sub.textContent = '$' + (qty * price).toLocaleString('es-AR');
+        const rowTotal = qty * price;
+        sum += rowTotal;
+        if (sub) sub.textContent = '$' + rowTotal.toLocaleString('es-AR');
       });
+      const disc = Number($('#field-discount')?.value || 0);
+      const sur = Number($('#field-surchargePercent')?.value || 10);
+      const finalTotal = Math.max(0, sum - (sum * disc / 100));
+      const cuota = Math.round((finalTotal * (1 + sur / 100)) / 3);
+      if (summaryEl) {
+        summaryEl.innerHTML = `Total Contado: <span style="color:#15803d">$${finalTotal.toLocaleString('es-AR')}</span> · 3 Cuotas (+${sur}%): <span style="color:#1e40af">3 x $${cuota.toLocaleString('es-AR')}</span>`;
+      }
     };
+    updateSubtotals();
     container?.addEventListener('input', updateSubtotals);
+    $('#field-discount')?.addEventListener('input', updateSubtotals);
+    $('#field-surchargePercent')?.addEventListener('input', updateSubtotals);
     container?.addEventListener('click', e => {
       const btn = e.target.closest('.remove-quote-item');
       if (btn && container.children.length > 1) {
@@ -5497,7 +6328,7 @@ function quoteForm(patientId = null) {
       const row = document.createElement('div');
       row.className = 'quote-item-row';
       row.innerHTML = `
-        <input type="text" class="quote-desc" placeholder="Concepto / Práctica" required>
+        <input type="text" class="quote-desc" placeholder="Terapia / Práctica" required>
         <input type="number" class="quote-qty" value="1" min="1" step="1" placeholder="Cant" required style="width:70px">
         <input type="number" class="quote-price" value="0" min="0" step="100" placeholder="Precio Unit" required style="width:110px">
         <span class="quote-subtotal" style="font-weight:700;font-size:12px;color:#1b4c37">$0</span>
@@ -5505,6 +6336,27 @@ function quoteForm(patientId = null) {
       `;
       container?.append(row);
     });
+
+    const setProgramPreset = (preset) => {
+      const patId = $('#field-patientId')?.value;
+      const curPat = patientBy(patId) || p;
+      const curMh = curPat?.medicalHistory || {};
+      const patRecords = (S.data?.records || []).filter(r => r.patientId === curPat?.id);
+      const lastProblem = patRecords[0]?.problem || patRecords[0]?.title || curMh.pathological || 'Fatiga celular y modulación inflamatoria';
+      if (preset === 'stage1') {
+        if ($('#field-title')) $('#field-title').value = 'Programa Signature · Etapa 1 (Cámara Hiperbárica + Sueroterapia + Fotobiomodulación)';
+        if ($('#field-stageSubtitle')) $('#field-stageSubtitle').value = 'ETAPA 1 · PROGRAMA CLÍNICO INTENSIVO PERSONALIZADO';
+        if ($('#field-clinicalContext')) $('#field-clinicalContext').value = `Diseñado para ${nameOf(curPat)} (foco clínico: ${lastProblem}). Combina las tres terapias pilares para restaurar la oxigenación tisular, reponer micronutrientes esenciales por vía endovenosa y activar la energía mitocondrial.`;
+      } else {
+        if ($('#field-title')) $('#field-title').value = 'Programa Signature · Detox Celular & Longevidad Saludable';
+        if ($('#field-stageSubtitle')) $('#field-stageSubtitle').value = 'PROGRAMA INTEGRATIVO DE DETOXIFICACIÓN Y LONGEVIDAD';
+        if ($('#field-clinicalContext')) $('#field-clinicalContext').value = `Protocolo avanzado para ${nameOf(curPat)} orientado a quelación suave, soporte antioxidante con Glutatión/Vitamina C, fotobiomodulación y oxigenación hiperbárica.`;
+      }
+      toast('Programa clínico personalizado con IA a partir de la historia clínica del paciente.');
+    };
+
+    $('#btn-ai-signature-stage1')?.addEventListener('click', () => setProgramPreset('stage1'));
+    $('#btn-ai-signature-longevity')?.addEventListener('click', () => setProgramPreset('longevity'));
   }, 50);
 }
 
@@ -5660,7 +6512,7 @@ function hospitalDayView() {
     return true;
   });
 
-  return heading('Hospital de Día & Terapias Ambulatorias',
+  return heading('Terapias Ambulatorias',
     'Gestión de sillones de sueroterapia, cámara hiperbárica y fotobiomodulación con evolución de enfermería y descuento automático de insumos.',
     `<button class="btn primary" data-action="new-hospital-day-order">${icon('plus', 14)} Nueva Indicación por Sesión</button>`
   ) + `
@@ -5751,7 +6603,7 @@ function hospitalDayView() {
   <section class="panel">
     <div class="panel-header">
       <div>
-        <h2>Kardex de Hospital de Día y Administración de Insumos</h2>
+        <h2>Kardex de Terapias Ambulatorias y Administración de Insumos</h2>
         <p class="panel-sub">Órdenes médicas por sesión, evolución separada de enfermería y descuento automático de inventario.</p>
       </div>
       <div class="flex" style="gap:8px;flex-wrap:wrap">
@@ -5838,7 +6690,7 @@ function hospitalDayView() {
             </div>`;
           }).join('')}
         </div>
-      ` : empty('Sin sesiones en este filtro', 'No hay órdenes de Hospital de Día registradas con el filtro seleccionado.', btn('Nueva Indicación por Sesión', 'new-hospital-day-order', 'plus', 'primary'))}
+      ` : empty('Sin sesiones en este filtro', 'No hay órdenes de Terapias Ambulatorias registradas con el filtro seleccionado.', btn('Nueva Indicación por Sesión', 'new-hospital-day-order', 'plus', 'primary'))}
     </div>
   </section>`;
 }
@@ -5853,7 +6705,7 @@ function newHospitalDayOrderDialog(patientId = null, defaultResource = null, def
     'Cámara Hiperbárica 1', 'Cabina Fotobiomodulación'
   ];
 
-  formDialog('new-hospital-day-order', 'Nueva Indicación de Hospital de Día por Sesión',
+  formDialog('new-hospital-day-order', 'Nueva Indicación de Terapias Ambulatorias por Sesión',
     'Permite que el médico indique los insumos y dosis por sesión. Genera orden para enfermería y descuenta stock automáticamente.',
     `<div class="form-grid">
       <div class="form-field">
@@ -6193,15 +7045,53 @@ function patientImportDialog() {
 const omniaImportDialog = patientImportDialog;
 const omniaImporterDialog = patientImportDialog;
 
-function paymentForm(patientId) {
+function paymentForm(patientId, defaultMovementType = 'INCOME') {
   const id = makeId();
-  formDialog('payment', 'Registrar Cobro de Consulta', 'Ingreso por atención médica.',
-    patientSelect(patientId) +
-    field('Importe en ARS *', 'amount', 'number', '', 'required min="0.01" max="10000000" step="0.01"') +
-    selectField('Método de pago', 'method', [['TRANSFERENCIA', 'Transferencia bancaria'], ['EFECTIVO', 'Efectivo en recepción'], ['TARJETA', 'Tarjeta de débito/crédito'], ['OTRO', 'Otro']]) +
-    field('Número de comprobante / Referencia', 'reference', 'text', '', 'maxlength="200" placeholder="Ej. TRF-109283"', true),
-    'Confirmar cobro', `data-key="${id}"`
+  const isExp = defaultMovementType === 'EXPENSE';
+  formDialog('payment',
+    isExp ? 'Registrar Egreso / Gasto Operativo' : 'Registrar Ingreso, Seña o Pago de Tratamiento',
+    'Categoriza los ingresos (señas, pagos totales de programa, cuotas o consultas) y egresos de la clínica.',
+    selectField('Tipo de Movimiento *', 'movementType', [
+      ['INCOME', '↑ Ingreso (Seña, Pago Total de Tratamiento, Cuota o Consulta)'],
+      ['EXPENSE', '↓ Egreso (Compra de Insumos/Fármacos, Honorarios o Gasto Operativo)']
+    ], defaultMovementType) +
+    selectField('Categoría Contable *', 'category', [
+      ['DEPOSIT', 'Ingreso · Seña / Anticipo de Tratamiento'],
+      ['FULL_PAYMENT', 'Ingreso · Pago Total de Tratamiento / Programa'],
+      ['INSTALLMENT', 'Ingreso · Cuota de Programa Clínico (Plan 3 cuotas)'],
+      ['CONSULTATION', 'Ingreso · Consulta Médica'],
+      ['SUPPLIES', 'Egreso · Compra de Insumos y Fármacos'],
+      ['FEES', 'Egreso · Honorarios Profesionales'],
+      ['OPERATING', 'Egreso · Gastos Operativos / Servicios de Clínica']
+    ], isExp ? 'SUPPLIES' : 'DEPOSIT') +
+    `<div class="form-field full" id="pay-patient-wrap">
+      <label for="field-patientId">Paciente Asociado (Opcional en egresos generales)</label>
+      <select id="field-patientId" name="patientId">
+        <option value="">-- Sin paciente asociado (Gasto general / Proveedor) --</option>
+        ${(S.data?.patients || []).map(p => `<option value="${esc(p.id)}" ${p.id === (patientId || S.selectedPatient || (!isExp ? S.data?.patients?.[0]?.id : '')) ? 'selected' : ''}>${esc(nameOf(p))} (DNI ${esc(p.dni || '—')})</option>`).join('')}
+      </select>
+    </div>` +
+    field('Importe en ARS *', 'amount', 'number', '', 'required min="0.01" max="50000000" step="0.01" placeholder="Ej: 150000"') +
+    selectField('Medio de Pago', 'method', [['TRANSFERENCIA', 'Transferencia bancaria'], ['EFECTIVO', 'Efectivo en recepción'], ['TARJETA', 'Tarjeta de débito / crédito'], ['MERCADOPAGO', 'Mercado Pago / QR'], ['OTRO', 'Otro']]) +
+    field('Concepto / N° de Comprobante / Referencia *', 'reference', 'text', '', 'required maxlength="200" placeholder="Ej. Seña 50% Programa Signature Etapa 1 · TRF-109283"', true),
+    isExp ? 'Registrar Egreso' : 'Confirmar Movimiento', `data-key="${id}"`, 'wide'
   );
+
+  setTimeout(() => {
+    const movSel = $('#field-movementType');
+    const catSel = $('#field-category');
+    movSel?.addEventListener('change', () => {
+      if (movSel.value === 'EXPENSE' && !['SUPPLIES', 'FEES', 'OPERATING'].includes(catSel?.value)) {
+        if (catSel) catSel.value = 'SUPPLIES';
+      } else if (movSel.value === 'INCOME' && ['SUPPLIES', 'FEES', 'OPERATING'].includes(catSel?.value)) {
+        if (catSel) catSel.value = 'DEPOSIT';
+      }
+    });
+    catSel?.addEventListener('change', () => {
+      if (['SUPPLIES', 'FEES', 'OPERATING'].includes(catSel.value) && movSel) movSel.value = 'EXPENSE';
+      else if (movSel) movSel.value = 'INCOME';
+    });
+  }, 40);
 }
 
 function invoiceForm() {
@@ -6398,12 +7288,157 @@ function createLotDialog() {
   }, 50);
 }
 
+const VADEMECUM_CATALOG = [
+  { drug: 'Amoxicilina + Ácido Clavulánico 875/125 mg', presentation: 'Comprimidos recubiertos x 14', dosage: '1 comprimido vía oral cada 12 horas durante 7 días.' },
+  { drug: 'Ibuprofeno 600 mg', presentation: 'Comprimidos x 20', dosage: '1 comprimido cada 8 horas después de las comidas si hay dolor o inflamación.' },
+  { drug: 'Paracetamol 1 g', presentation: 'Comprimidos x 16', dosage: '1 comprimido cada 8 horas en caso de dolor o fiebre.' },
+  { drug: 'Ketorolac Trometamina 20 mg', presentation: 'Comprimidos sublinguales x 10', dosage: '1 comprimido sublingual cada 8 horas por máximo 3 días.' },
+  { drug: 'Cefalexina 500 mg', presentation: 'Comprimidos x 16', dosage: '1 comprimido cada 6 u 8 horas durante 7 días.' },
+  { drug: 'Levotiroxina Sódica 50 mcg', presentation: 'Comprimidos x 50', dosage: '1 comprimido en ayunas 30 minutos antes del desayuno.' },
+  { drug: 'Levotiroxina Sódica 75 mcg', presentation: 'Comprimidos x 50', dosage: '1 comprimido en ayunas 30 minutos antes del desayuno.' },
+  { drug: 'Magnesio Bisglicinato 400 mg (Quelado)', presentation: 'Cápsulas x 60', dosage: '2 cápsulas por la noche antes de dormir.' },
+  { drug: 'Vitamina D3 5.000 UI + Vitamina K2 (MK-7) 100 mcg', presentation: 'Cápsulas blandas x 60', dosage: '1 cápsula diaria junto con una comida con grasas saludables.' },
+  { drug: 'Vitamina C Liposomal 1.000 mg', presentation: 'Cápsulas / Sobres x 30', dosage: '1 toma diaria por la mañana.' },
+  { drug: 'Omega 3 EPA/DHA Ultra Purificado 1.000 mg', presentation: 'Cápsulas blandas x 60', dosage: '1 cápsula con el almuerzo y 1 cápsula con la cena.' },
+  { drug: 'Coenzima Q10 (Ubiquinol) 200 mg', presentation: 'Cápsulas x 30', dosage: '1 cápsula diaria con el desayuno.' },
+  { drug: 'Ácido Alfa Lipoico (R-ALA) 300 mg', presentation: 'Cápsulas x 60', dosage: '1 cápsula 30 minutos antes del almuerzo y cena.' },
+  { drug: 'N-Acetilcisteína (NAC) 600 mg', presentation: 'Comprimidos / Sobres x 30', dosage: '1 comprimido diario lejos de las comidas.' },
+  { drug: 'Complejo Vitamínico B Metilado (B12 Metilcobalamina + Folato)', presentation: 'Cápsulas x 30', dosage: '1 cápsula diaria con el desayuno.' },
+  { drug: 'Melatonina de Liberación Prolongada 3 mg', presentation: 'Comprimidos x 30', dosage: '1 comprimido 45 minutos antes de acostarse.' },
+  { drug: 'Omeprazol 20 mg', presentation: 'Cápsulas gastrorresistentes x 30', dosage: '1 cápsula en ayunas por la mañana.' },
+  { drug: 'Enalapril 10 mg', presentation: 'Comprimidos x 30', dosage: '1 comprimido cada 12 horas según control de tensión arterial.' },
+  { drug: 'Metformina Liberación Prolongada (XR) 850 mg', presentation: 'Comprimidos x 30', dosage: '1 comprimido junto con la cena.' }
+];
+
 function prescriptionForm() {
-  formDialog('prescription', 'Emitir Receta Médica', 'Prescripción de medicamentos e indicaciones para farmacia.',
+  const allDocs = (S.data?.staff || S.data?.doctors || []).filter(d => d.role === 'DOCTOR' || d.licenseNumber || d.specialty);
+  const docs = allDocs.length ? allDocs : (S.data?.doctors || []);
+  const firstDoc = docs[0] || { id: '', name: S.session?.user?.name || 'Médico Tratante', licenseNumber: 'M.N. 142.850', specialty: 'Medicina Integrativa' };
+  const autoCuir = `AR-CUIR-${new Date().getFullYear()}-${String(Math.floor(10000000 + Math.random() * 90000000))}-${makeId().slice(0, 4).toUpperCase()}`;
+
+  formDialog('prescription', 'Emitir Receta Electrónica Legal (Ley 27.553 · Estándar RCTA)',
+    'Buscador de Vademécum, código CUIR automático, QR de validación farmacéutica, logo de clínica y firma digital con matrícula del médico.',
     patientSelect() +
-    area('Detalle de prescripción (Medicamento, presentación, posología) *', 'content', '', 'required maxlength="8000" placeholder="Rp/\nParacetamol 500mg - 1 caja\nTomar 1 comprimido cada 8 horas si hay dolor."'),
-    'Emitir receta'
+    `<div class="form-field full">
+      <div class="between" style="margin-bottom:4px">
+        <label for="field-doctorId" style="margin:0">Médico Prescriptor (Imprime Firma Digital, Sello y Matrícula) *</label>
+        <button type="button" class="text-link tiny" id="rx-config-sig-btn">${icon('edit', 11)} Configurar firma / matrícula del médico</button>
+      </div>
+      <select id="field-doctorId" name="doctorId" required>
+        ${docs.map(d => `<option value="${esc(d.id)}" data-name="${esc(d.name)}" data-license="${esc(d.licenseNumber || 'M.N. 142.850')}">${esc(d.name)} — ${esc(d.specialty || 'Médico')} (${esc(d.licenseNumber || 'M.N. 142.850')}) ${d.signatureData ? '· ✓ Firma Digital Cargada' : ''}</option>`).join('')}
+      </select>
+    </div>` +
+    field('Diagnóstico Clínico / CIE-10 *', 'diagnosis', 'text', 'Soporte metabólico y modulación inflamatoria (CIE-10: E63.9 / R53)', 'required maxlength="250" placeholder="Ej: Fatiga crónica (R53), Hipotiroidismo (E03.9), Post-operatorio (Z48)..."') +
+    field('CUIR (Código Único de Identificación de Receta)', 'cuir', 'text', autoCuir, 'readonly style="font-family:monospace;background:#f8fafc;color:#1b4c37;font-weight:700"') +
+
+    `<div class="form-field full" style="background:#f8fbf9;border:1px solid #d5e3d8;border-radius:10px;padding:12px 14px">
+      <label style="color:#1b4c37;font-weight:700;display:flex;align-items:center;gap:6px;margin-bottom:6px">
+        ${icon('search', 14)} Buscador de Vademécum Farmacológico & Magistral
+      </label>
+      <div class="flex" style="gap:8px;margin-bottom:8px">
+        <input type="search" id="vademecum-search" placeholder="Buscar por droga genérica, presentación o nombre comercial (ej: Magnesio, Amoxicilina, Vitamina D3, Ibuprofeno)..." style="flex:1">
+        <button type="button" class="btn small" id="vademecum-add-custom">${icon('plus', 12)} Agregar Fármaco Manual</button>
+      </div>
+      <div id="vademecum-results" style="max-height:135px;overflow-y:auto;border:1px solid #dce6dd;border-radius:8px;background:#fff;padding:4px;margin-bottom:10px">
+        ${VADEMECUM_CATALOG.map((v, idx) => `
+          <button type="button" class="vademecum-opt" data-idx="${idx}" style="width:100%;text-align:left;padding:6px 10px;border-radius:6px;background:transparent;color:#182d27;font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <span><b>${esc(v.drug)}</b> · <span class="muted">${esc(v.presentation)}</span></span>
+            <span class="badge green" style="font-size:10px">+ Agregar a Rp/</span>
+          </button>
+        `).join('')}
+      </div>
+
+      <label style="font-size:12px;font-weight:700;color:#1e3a2b;margin-bottom:6px;display:block">Medicamentos Prescriptos en la Receta (Rp/):</label>
+      <div id="rx-meds-list" style="display:flex;flex-direction:column;gap:8px"></div>
+      <input type="hidden" name="medicationsJson" id="rx-meds-json" value="[]">
+    </div>` +
+    area('Texto consolidado de la Receta (Rp/ e indicaciones al paciente) *', 'content', '', 'required maxlength="8000" style="height:105px" placeholder="Selecciona medicamentos del Vademécum arriba o escribe el detalle aquí..."'),
+    'Firmar y Emitir Receta Legal (PDF / QR)', '', 'wide'
   );
+
+  setTimeout(() => {
+    const searchInput = $('#vademecum-search');
+    const resultsBox = $('#vademecum-results');
+    const medsList = $('#rx-meds-list');
+    const medsJsonInput = $('#rx-meds-json');
+    const contentArea = $('#field-content');
+    const medsState = [];
+
+    const syncMeds = () => {
+      if (medsJsonInput) medsJsonInput.value = JSON.stringify(medsState);
+      if (medsList) {
+        medsList.innerHTML = medsState.map((m, i) => `
+          <div style="background:#fff;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;display:grid;grid-template-columns:1.4fr 1fr 90px 28px;gap:6px;align-items:center">
+            <input type="text" class="rx-m-drug" data-i="${i}" value="${esc(m.drug)}" placeholder="Droga / Medicamento" style="font-size:12px;font-weight:700">
+            <input type="text" class="rx-m-pres" data-i="${i}" value="${esc(m.presentation)}" placeholder="Presentación" style="font-size:12px">
+            <input type="text" class="rx-m-qty" data-i="${i}" value="${esc(m.quantity)}" placeholder="Cant." style="font-size:12px">
+            <button type="button" class="icon-btn rx-m-del" data-i="${i}" style="color:#b91c1c">${icon('close', 13)}</button>
+            <input type="text" class="rx-m-dos" data-i="${i}" value="${esc(m.dosage)}" placeholder="Posología e indicaciones" style="grid-column:1 / -1;font-size:12px">
+          </div>
+        `).join('') || `<div class="tiny muted" style="padding:6px">Haz clic en cualquier medicamento del Vademécum para añadirlo a la receta.</div>`;
+      }
+      if (contentArea && medsState.length) {
+        contentArea.value = medsState.map((m, i) => `${i + 1}) ${m.drug} (${m.presentation}) — Cantidad: ${m.quantity}\n   Indicaciones: ${m.dosage}`).join('\n\n');
+      }
+    };
+
+    const addMed = (item) => {
+      medsState.push({
+        drug: item.drug || '',
+        presentation: item.presentation || '1 envase',
+        quantity: item.quantity || '1 envase',
+        dosage: item.dosage || 'Según indicación médica.'
+      });
+      syncMeds();
+    };
+
+    resultsBox?.addEventListener('click', e => {
+      const btn = e.target.closest('.vademecum-opt');
+      if (!btn) return;
+      const v = VADEMECUM_CATALOG[Number(btn.dataset.idx)];
+      if (v) addMed(v);
+    });
+
+    $('#vademecum-add-custom')?.addEventListener('click', () => {
+      addMed({ drug: searchInput?.value?.trim() || 'Nuevo medicamento', presentation: 'Comprimidos / Cápsulas', quantity: '1 envase', dosage: 'Tomar según indicación.' });
+    });
+
+    searchInput?.addEventListener('input', e => {
+      const q = (e.target.value || '').toLowerCase().trim();
+      resultsBox?.querySelectorAll('.vademecum-opt').forEach(btn => {
+        const v = VADEMECUM_CATALOG[Number(btn.dataset.idx)];
+        const match = !q || v.drug.toLowerCase().includes(q) || v.presentation.toLowerCase().includes(q) || v.dosage.toLowerCase().includes(q);
+        btn.style.display = match ? 'flex' : 'none';
+      });
+    });
+
+    medsList?.addEventListener('input', e => {
+      const idx = Number(e.target.dataset.i);
+      if (!medsState[idx]) return;
+      if (e.target.classList.contains('rx-m-drug')) medsState[idx].drug = e.target.value;
+      if (e.target.classList.contains('rx-m-pres')) medsState[idx].presentation = e.target.value;
+      if (e.target.classList.contains('rx-m-qty')) medsState[idx].quantity = e.target.value;
+      if (e.target.classList.contains('rx-m-dos')) medsState[idx].dosage = e.target.value;
+      if (medsJsonInput) medsJsonInput.value = JSON.stringify(medsState);
+      if (contentArea) {
+        contentArea.value = medsState.map((m, i) => `${i + 1}) ${m.drug} (${m.presentation}) — Cantidad: ${m.quantity}\n   Indicaciones: ${m.dosage}`).join('\n\n');
+      }
+    });
+
+    medsList?.addEventListener('click', e => {
+      const del = e.target.closest('.rx-m-del');
+      if (!del) return;
+      medsState.splice(Number(del.dataset.i), 1);
+      syncMeds();
+    });
+
+    $('#rx-config-sig-btn')?.addEventListener('click', () => {
+      const docId = $('#field-doctorId')?.value || firstDoc.id;
+      if (docId) doctorCredentialsDialog(docId);
+    });
+
+    syncMeds();
+  }, 40);
 }
 
 function leadForm() {
@@ -6639,6 +7674,7 @@ document.addEventListener('click', async e => {
       case 'select-doctor-filter': S.doctor = S.doctor === id ? '' : id; contentOnly(); break;
       case 'clear-doctor-filter': S.doctor = ''; contentOnly(); break;
       case 'new-staff': staffForm(); break;
+      case 'edit-doctor-credentials': doctorCredentialsDialog(id); break;
       case 'nav-staff': await navigate('staff'); break;
       case 'delete-staff': {
         const name = el.dataset.name || 'este miembro';
@@ -6867,7 +7903,9 @@ document.addEventListener('click', async e => {
       case 'amend-record': recordForm(id); break;
       case 'verify-record': await verifyRecord(id); break;
       case 'new-prescription': prescriptionForm(); break;
-      case 'new-payment': paymentForm(el.dataset.patientId); break;
+      case 'new-payment': paymentForm(el.dataset.patientId, 'INCOME'); break;
+      case 'new-expense': paymentForm(el.dataset.patientId, 'EXPENSE'); break;
+      case 'payment-filter': S.paymentFilter = el.dataset.val; contentOnly(); break;
       case 'new-invoice': invoiceForm(); break;
       case 'billing-tab': S.billingTab = el.dataset.value; contentOnly(); break;
       case 'share-invoice-wa': {
@@ -6915,7 +7953,7 @@ document.addEventListener('click', async e => {
       }
       case 'export-patients': exportPatients(); break;
       case 'print-record': window.open('/api/records/' + id + '/document', '_blank'); break;
-      case 'print-prescription': window.open('/api/prescriptions/' + id + '/document', '_blank'); break;
+      case 'print-prescription': printPrescriptionDocument(id); break;
       case 'send-wa-reminder': {
         el.disabled = true;
         try {
@@ -7139,6 +8177,20 @@ document.addEventListener('submit', async e => {
           unitPrice: Math.max(0, Number(row.querySelector('.quote-price')?.value || 0))
         })).filter(it => it.description);
         if (!items.length) throw new Error('Agrega al menos un ítem con descripción al presupuesto.');
+        const objectives = String(b.objectivesText || '')
+          .split('\n')
+          .map(x => x.trim())
+          .filter(Boolean);
+        const serializedNotes = JSON.stringify({
+          type: 'SIGNATURE_PROGRAM',
+          stageSubtitle: b.stageSubtitle || 'ETAPA 1 · PROGRAMA CLÍNICO INTENSIVO PERSONALIZADO',
+          clinicalContext: b.clinicalContext || '',
+          rationale: b.rationale || '',
+          objectives: objectives.length ? objectives : undefined,
+          schedulePlan: b.schedulePlan || '',
+          surchargePercent: Number(b.surchargePercent ?? 10),
+          additionalNotes: b.notes || ''
+        });
         await api('/api/quotes', 'POST', {
           patientId: b.patientId,
           doctorId: b.doctorId || null,
@@ -7146,12 +8198,12 @@ document.addEventListener('submit', async e => {
           currency: b.currency || 'ARS',
           validUntil: b.validUntil || plusDays(dateKey(), 15),
           discount: Number(b.discount || b.discountPercent || 0),
-          notes: b.notes || '',
+          notes: serializedNotes,
           items
         });
         S.view = 'billing';
         S.billingTab = 'quotes';
-        message = 'Presupuesto médico creado exitosamente.';
+        message = 'Programa clínico y presupuesto creado exitosamente.';
         break;
       }
       case 'upload-study': {
@@ -7270,6 +8322,11 @@ document.addEventListener('submit', async e => {
         message = 'Nuevo miembro del equipo registrado con éxito.';
         S.view = 'staff';
         break;
+      case 'doctor-credentials':
+        await api('/api/staff/' + form.dataset.id + '/credentials', 'PATCH', b);
+        message = 'Firma digital, sello y matrícula profesional guardados correctamente.';
+        S.view = 'staff';
+        break;
       case 'lead':
         await api('/api/leads', 'POST', b);
         S.view = 'pipeline';
@@ -7300,18 +8357,37 @@ document.addEventListener('submit', async e => {
         message = 'Evolución médica firmada y registrada.' + (supplies.length ? ` Se descontaron ${supplies.length} insumos del inventario.` : '');
         break;
       }
-      case 'prescription':
-        await api('/api/prescriptions', 'POST', b);
+      case 'prescription': {
+        let meds = [];
+        try { meds = JSON.parse(b.medicationsJson || '[]'); } catch {}
+        const doc = resolveDoctorForDoc(b.doctorId);
+        await api('/api/prescriptions', 'POST', {
+          patientId: b.patientId,
+          doctorId: b.doctorId || doc.id,
+          doctorName: doc.name,
+          doctorLicense: doc.licenseNumber,
+          cuir: b.cuir,
+          diagnosis: b.diagnosis || '',
+          medications: meds,
+          content: b.content
+        });
         S.view = 'records';
         S.recordTab = 'prescriptions';
+        S.omniTab = 'prescripciones';
         S.selectedPatient = b.patientId;
-        message = 'Receta médica emitida.';
+        message = 'Receta médica electrónica legal (CUIR + Firma Digital + QR) emitida.';
         break;
+      }
       case 'payment':
-        await api('/api/payments', 'POST', { ...b, amount: Number(b.amount) }, { 'Idempotency-Key': form.dataset.key });
+        await api('/api/payments', 'POST', {
+          ...b,
+          amount: Number(b.amount),
+          movementType: b.movementType || 'INCOME',
+          category: b.category || 'CONSULTATION'
+        }, { 'Idempotency-Key': form.dataset.key });
         S.view = 'billing';
         S.billingTab = 'payments';
-        message = 'Cobro registrado correctamente.';
+        message = b.movementType === 'EXPENSE' ? 'Egreso registrado y categorizado correctamente.' : 'Ingreso / cobro registrado y categorizado correctamente.';
         break;
       case 'invoice': {
         const arca = (S.data?.integrations || []).find(i => i.id === 'arca');

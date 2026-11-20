@@ -89,6 +89,17 @@ try { db.exec('ALTER TABLE medical_orders ADD COLUMN totalSessions INTEGER DEFAU
 try { db.exec('ALTER TABLE medical_orders ADD COLUMN parameters TEXT DEFAULT "{}"'); } catch {}
 try { db.exec('ALTER TABLE medical_orders ADD COLUMN vitals TEXT DEFAULT "{}"'); } catch {}
 try { db.exec('ALTER TABLE medical_orders ADD COLUMN startedAt TEXT'); } catch {}
+try { db.exec('ALTER TABLE doctors ADD COLUMN license_number TEXT'); } catch {}
+try { db.exec('ALTER TABLE doctors ADD COLUMN signature_data TEXT'); } catch {}
+try { db.exec('ALTER TABLE doctors ADD COLUMN address TEXT'); } catch {}
+try { db.exec('ALTER TABLE payments ADD COLUMN movementType TEXT DEFAULT "INCOME"'); } catch {}
+try { db.exec('ALTER TABLE payments ADD COLUMN category TEXT DEFAULT "CONSULTATION"'); } catch {}
+try { db.exec('ALTER TABLE prescriptions ADD COLUMN doctorId TEXT'); } catch {}
+try { db.exec('ALTER TABLE prescriptions ADD COLUMN doctorName TEXT'); } catch {}
+try { db.exec('ALTER TABLE prescriptions ADD COLUMN doctorLicense TEXT'); } catch {}
+try { db.exec('ALTER TABLE prescriptions ADD COLUMN cuir TEXT'); } catch {}
+try { db.exec('ALTER TABLE prescriptions ADD COLUMN diagnosis TEXT'); } catch {}
+try { db.exec('ALTER TABLE prescriptions ADD COLUMN medications TEXT DEFAULT "[]"'); } catch {}
 
 seedDatabase(db);
 
@@ -1391,11 +1402,22 @@ async function handle(req, res) {
           ...p,
           medicalHistory: p.medicalHistory ? (typeof p.medicalHistory === 'string' ? JSON.parse(p.medicalHistory) : p.medicalHistory) : null
         })),
-        doctors: rows('doctors'),
-        staff: all('SELECT id, workspaceId, role, email, name FROM users WHERE workspaceId=?', w).map(su => ({
-          ...su,
-          specialty: (all('SELECT id, specialty FROM doctors WHERE workspaceId=?', w).find(d => d.id === su.id)?.specialty) || (su.role === 'RECEPTIONIST' ? 'Recepción y Turnos' : (su.role === 'DOCTOR' ? 'Medicina General' : (su.role === 'NURSE' ? 'Enfermería y Cuidados' : 'Administración')))
+        doctors: rows('doctors').map(d => ({
+          ...d,
+          licenseNumber: d.license_number || d.licenseNumber || '',
+          signatureData: d.signature_data || d.signatureData || '',
+          address: d.address || ''
         })),
+        staff: all('SELECT id, workspaceId, role, email, name FROM users WHERE workspaceId=?', w).map(su => {
+          const doc = all('SELECT * FROM doctors WHERE workspaceId=?', w).find(d => d.id === su.id || d.name?.toLowerCase() === su.name?.toLowerCase());
+          return {
+            ...su,
+            specialty: doc?.specialty || (su.role === 'RECEPTIONIST' ? 'Recepción y Turnos' : (su.role === 'DOCTOR' ? 'Medicina General' : (su.role === 'NURSE' ? 'Enfermería y Cuidados' : 'Administración'))),
+            licenseNumber: doc?.license_number || '',
+            signatureData: doc?.signature_data || '',
+            address: doc?.address || ''
+          };
+        }),
         appointments: rows('appointments'),
         agendas: rows('agendas'),
         quotes: rows('quotes').map(q => ({ ...q, items: typeof q.items === 'string' ? JSON.parse(q.items) : (q.items || []) })),
@@ -1447,6 +1469,27 @@ async function handle(req, res) {
       }
       audit(u, 'STAFF_MEMBER_CREATED', 'user', id, `Miembro ${name} creado con rol ${role}.`);
       return json(res, 201, { id, email, name, role, workspaceId: w });
+    }
+
+    const staffCredMatch = path.match(/^\/api\/staff\/([^/]+)\/credentials$/);
+    if (staffCredMatch && method === 'PATCH') {
+      const staffId = staffCredMatch[1];
+      const b = await body(req);
+      const doc = q('SELECT * FROM doctors WHERE workspaceId=? AND id=?', w, staffId) || q('SELECT * FROM doctors WHERE workspaceId=? AND LOWER(name)=LOWER(?)', w, b.name || '');
+      if (doc) {
+        run('UPDATE doctors SET specialty=?, license_number=?, signature_data=?, address=? WHERE workspaceId=? AND id=?',
+          optional(b.specialty, 'Especialidad', 120) || doc.specialty,
+          optional(b.licenseNumber, 'Matrícula', 80),
+          b.signatureData || doc.signature_data || '',
+          optional(b.address, 'Domicilio', 250),
+          w, doc.id);
+      } else {
+        const usr = q('SELECT * FROM users WHERE workspaceId=? AND id=?', w, staffId);
+        run('INSERT INTO doctors(id, workspaceId, name, specialty, license_number, signature_data, address) VALUES(?,?,?,?,?,?,?)',
+          staffId, w, usr?.name || b.name || 'Profesional', optional(b.specialty, 'Especialidad', 120) || 'Medicina General', optional(b.licenseNumber, 'Matrícula', 80), b.signatureData || '', optional(b.address, 'Domicilio', 250));
+      }
+      audit(u, 'STAFF_CREDENTIALS_UPDATED', 'user', staffId, `Credenciales y firma digital actualizadas para ${b.name || staffId}.`);
+      return json(res, 200, { ok: true, id: staffId });
     }
 
     const staffDelMatch = path.match(/^\/api\/staff\/([^/]+)$/);
@@ -2039,12 +2082,27 @@ async function handle(req, res) {
     if (path === '/api/prescriptions' && method === 'POST') {
       const b = await body(req);
       patient(w, text(b.patientId, 'Paciente', 1, 100));
-      const r = { id: uid(), workspaceId: w, patientId: b.patientId, content: text(b.content, 'Receta', 1, 8000), status: 'ACTIVE', createdAt: now() };
+      const doc = b.doctorId ? q('SELECT * FROM doctors WHERE workspaceId=? AND id=?', w, b.doctorId) : null;
+      const cuir = b.cuir || `CUIR-AR-${new Date().getFullYear()}-${String(Math.floor(10000000 + Math.random() * 90000000))}`;
+      const r = {
+        id: uid(),
+        workspaceId: w,
+        patientId: b.patientId,
+        doctorId: b.doctorId || doc?.id || u.id,
+        doctorName: b.doctorName || doc?.name || u.name,
+        doctorLicense: b.doctorLicense || doc?.license_number || '',
+        cuir,
+        diagnosis: optional(b.diagnosis, 'Diagnóstico', 500),
+        medications: JSON.stringify(Array.isArray(b.medications) ? b.medications : []),
+        content: text(b.content, 'Receta', 1, 8000),
+        status: 'ACTIVE',
+        createdAt: now()
+      };
       transaction(() => {
         put('prescriptions', r);
-        audit(u, 'PRESCRIPTION_CREATED', 'prescription', r.id, `Receta médica emitida por ${u.name}.`);
+        audit(u, 'PRESCRIPTION_CREATED', 'prescription', r.id, `Receta médica oficial (${cuir}) emitida por ${r.doctorName}.`);
       });
-      return json(res, 201, { ...r, legalValidity: true });
+      return json(res, 201, { ...r, medications: Array.isArray(b.medications) ? b.medications : [], legalValidity: true });
     }
 
     if (path === '/api/consents' && method === 'POST') {
@@ -2082,14 +2140,21 @@ async function handle(req, res) {
 
     if (path === '/api/payments' && method === 'POST') {
       const b = await body(req), key = text(req.headers['idempotency-key'], 'Clave de operación', 8, 100);
-      patient(w, text(b.patientId, 'Paciente', 1, 100));
-      if (b.appointmentId && !q('SELECT id FROM appointments WHERE workspaceId=? AND patientId=? AND id=?', w, b.patientId, b.appointmentId)) {
+      const movementType = b.movementType === 'EXPENSE' ? 'EXPENSE' : 'INCOME';
+      const fallbackPatient = q('SELECT id FROM patients WHERE workspaceId=? LIMIT 1', w)?.id;
+      const patId = b.patientId || fallbackPatient;
+      if (movementType === 'INCOME' || patId) {
+        patient(w, text(patId, 'Paciente', 1, 100));
+      }
+      if (b.appointmentId && !q('SELECT id FROM appointments WHERE workspaceId=? AND patientId=? AND id=?', w, patId, b.appointmentId)) {
         fail(404, 'Turno del paciente no encontrado.');
       }
       const p = {
-        id: uid(), workspaceId: w, patientId: b.patientId, appointmentId: b.appointmentId || null,
+        id: uid(), workspaceId: w, patientId: patId, appointmentId: b.appointmentId || null,
         amountCents: money(b.amount),
         method: choose(b.method || 'TRANSFERENCIA', ['TRANSFERENCIA', 'EFECTIVO', 'TARJETA', 'MERCADOPAGO', 'OTRO'], 'Método'),
+        movementType,
+        category: optional(b.category, 'Categoría', 80) || (movementType === 'EXPENSE' ? 'OPERATING' : 'CONSULTATION'),
         reference: optional(b.reference, 'Referencia', 200),
         idempotencyKey: key, createdAt: now()
       };
