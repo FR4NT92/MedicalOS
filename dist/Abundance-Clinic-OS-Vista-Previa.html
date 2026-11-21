@@ -2825,6 +2825,31 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     const wsId = S.portal?.patient?.workspaceId || 'clinic-central';
     let attachments = [];
     try { attachments = JSON.parse(body.attachmentPayload || body.attachmentsJson || '[]'); } catch {}
+
+    if (body.studyType === 'PAYMENT_RECEIPT') {
+      const amountCents = Math.max(100, Math.round((Number(body.amount) || 0) * 100));
+      const newPay = {
+        id: 'pay-' + makeId().slice(0, 8),
+        workspace_id: wsId,
+        patient_id: patId,
+        amount_cents: amountCents,
+        movement_type: 'INCOME',
+        category: 'FULL_PAYMENT',
+        method: 'TRANSFERENCIA',
+        reference: `Comprobante Portal Paciente: ${body.title || 'Pago tratamiento'}${body.notes ? ' · ' + body.notes : ''}`,
+        idempotency_key: makeId(),
+        status: 'APPROVED',
+        created_at: new Date().toISOString()
+      };
+      const payRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/payments`, {
+        method: 'POST',
+        headers: { ...authHeaders, 'Prefer': 'return=representation' },
+        body: JSON.stringify(newPay)
+      });
+      if (!payRes.ok) throw Error('No se pudo registrar el comprobante de pago en la clínica.');
+      return { ok: true, message: 'Comprobante de pago enviado y registrado en Cobros de tu clínica.' };
+    }
+
     const newRec = {
       id: 'rec-' + makeId().slice(0, 8),
       workspace_id: wsId,
@@ -2838,7 +2863,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
         attachments,
         uploadedVia: 'PORTAL_PACIENTES'
       },
-      author: 'Paciente (Subida Online)',
+      author: 'Paciente (Portal)',
       created_at: new Date().toISOString(),
       previous_hash: 'PORTAL-GENESIS',
       hash: 'sha256-' + makeId() + makeId()
@@ -2848,8 +2873,11 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       headers: { ...authHeaders, 'Prefer': 'return=representation' },
       body: JSON.stringify(newRec)
     });
-    if (!res.ok) throw Error('No se pudo subir el estudio a tu historia clínica.');
-    return { ok: true, message: 'Estudio subido exitosamente a tu historia clínica.' };
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw Error(err.message || 'No se pudo subir el archivo a tu historia clínica.');
+    }
+    return { ok: true, message: 'Documento clasificado y guardado exitosamente en la ficha de tu clínica.' };
   }
 
   // ==========================================
@@ -3327,7 +3355,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       diagnosis: body.diagnosis || '',
       medications: meds,
       content: body.content || meds.map(m => `${m.drug} (${m.presentation || ''}) - ${m.dosage || ''}`).join('\n'),
-      status: 'ISSUED',
+      status: 'ACTIVE',
       created_at: new Date().toISOString()
     };
     const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/prescriptions`, {
@@ -4421,11 +4449,11 @@ function portalBookingDialog() {
         ${selectField('Profesional Médico *', 'doctorId', doctors.map(doc => [doc.id, `${doc.name} (${doc.specialty})`]), doctors[0]?.id, true)}
         ${selectField('Servicio / Agenda *', 'agendaId', (agendas.length ? agendas : [{ id: 'default', name: 'Consultorio General' }]).map(ag => [ag.id, ag.name]), agendas[0]?.id || 'default')}
         ${selectField('Tipo de Consulta *', 'type', [
-          ['Consulta Médica', 'Consulta Médica'],
-          ['Control / Seguimiento', 'Control / Seguimiento'],
-          ['Procedimiento / Sesión', 'Procedimiento / Sesión'],
-          ['Telemedicina / Videoconsulta', 'Telemedicina / Videoconsulta']
-        ], 'Consulta Médica')}
+          ['CONSULTATION', 'Consulta Médica'],
+          ['FOLLOW_UP', 'Control / Seguimiento'],
+          ['PROCEDURE', 'Procedimiento / Sesión'],
+          ['TELEMEDICINE', 'Telemedicina / Videoconsulta']
+        ], 'CONSULTATION')}
         ${field('Fecha del Turno *', 'date', 'date', plusDays(dateKey(), 1), 'required')}
         ${selectField('Horario Disponible *', 'time', [
           ['09:00', '09:00 hs'],
@@ -4461,12 +4489,18 @@ function portalUploadDialog() {
     `<form data-form="portal-upload-study">
       <div class="form-grid">
         ${field('Título / Nombre del Estudio *', 'title', 'text', '', 'required placeholder="Ej: Laboratorio Completo, Ecografía Abdominal..."', true)}
-        ${selectField('Tipo de Estudio *', 'studyType', [
-          ['LAB', 'Laboratorio / Análisis Bioquímico'],
+        ${selectField('Tipo de Documento *', 'studyType', [
+          ['LAB', 'Laboratorio / Análisis Bioquímico (va a Laboratorio)'],
           ['STUDY', 'Estudio de Imágenes (Ecografía, Rayos, Resonancia)'],
+          ['PRESCRIPTION_EXT', 'Receta Médica Externa (va a Documentos / HCD)'],
+          ['PAYMENT_RECEIPT', 'Comprobante / Factura de Pago Realizado (va a Cobros)'],
           ['DOCUMENT', 'Informe Médico Externo / Certificado']
         ], 'LAB')}
-        ${field('Especialidad', 'specialty', 'text', 'Bioquímica / Imágenes', 'placeholder="Ej: Bioquímica, Cardiología"')}
+        ${field('Especialidad (o Importe en ARS si es Comprobante)', 'specialty', 'text', 'Bioquímica / Imágenes', 'placeholder="Ej: Bioquímica, Cardiología"')}
+        <div class="form-field full" id="portal-amount-wrap" style="display:none">
+          <label for="portal-amount">Importe Abonado (ARS) *</label>
+          <input type="number" id="portal-amount" name="amount" min="1" step="0.01" placeholder="Ej: 150000">
+        </div>
         <div class="form-field full">
           <label>Seleccionar Archivo (PDF, JPG, PNG) *</label>
           <input type="file" id="portal-file-picker" required accept=".pdf,.png,.jpg,.jpeg">
@@ -4488,6 +4522,10 @@ function portalUploadDialog() {
   );
 
   setTimeout(() => {
+    $('#field-studyType')?.addEventListener('change', e => {
+      const wrap = $('#portal-amount-wrap');
+      if (wrap) wrap.style.display = e.target.value === 'PAYMENT_RECEIPT' ? 'block' : 'none';
+    });
     $('#portal-file-picker')?.addEventListener('change', e => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -5392,7 +5430,12 @@ function recordCard(r) {
           `).join('')}
         </div>
       ` : `
-        <div style="white-space:pre-wrap;line-height:1.6">${esc(typeof content === 'string' ? content : (content.text || content.notes || r.notes || JSON.stringify(content)))}</div>
+        <div style="white-space:pre-wrap;line-height:1.6">${(() => {
+          if (typeof content === 'string') return esc(content);
+          const txt = content.text || content.notes || r.notes || '';
+          if (txt) return esc(txt);
+          return `<span class="muted" style="font-style:italic">Evolución registrada (${esc(r.problem || content.problem || r.title || content.title || 'Consulta clínica')}).</span>`;
+        })()}</div>
       `}
 
       ${content.consumedSupplies && content.consumedSupplies.length ? `
