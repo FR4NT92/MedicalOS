@@ -305,7 +305,8 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?select=id,workspace_id`, { headers: authHeaders })
     ]);
     const workspaces = (await wsRes.json()) || [];
-    const integrations = (await integRes.json()) || [];
+    const rawIntegrations = (await integRes.json()) || [];
+    const integrations = rawIntegrations.filter(i => !i.workspace_id || i.workspace_id === currentWorkspaceId);
     const patients = (await patRes.json()) || [];
     const appointments = (await apptRes.json()) || [];
 
@@ -431,6 +432,12 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     }
   }
 
+  const fetchWorkspaceIntegration = async (integId) => {
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.${integId}`, { headers: authHeaders });
+    const rows = (await res.json().catch(() => [])) || [];
+    return rows.find(r => r.workspace_id === currentWorkspaceId) || rows.find(r => !r.workspace_id) || null;
+  };
+
   const integMatch = path.match(/^\/api\/admin\/integrations\/([^/]+)$/);
   if (integMatch && method === 'POST') {
     const integId = integMatch[1];
@@ -456,16 +463,35 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
         throw Error('Para conectar el Proveedor de IA debes ingresar la API Key.');
       }
     }
+    const existing = await fetchWorkspaceIntegration(integId);
     const updateBody = {
       config: configObj,
       status,
       updated_at: new Date().toISOString()
     };
-    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.${integId}`, {
-      method: 'PATCH',
-      headers: { ...authHeaders, 'Prefer': 'return=representation' },
-      body: JSON.stringify(updateBody)
-    });
+    let res;
+    if (existing) {
+      const wsFilter = existing.workspace_id ? `&workspace_id=eq.${encodeURIComponent(existing.workspace_id)}` : '';
+      res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.${integId}${wsFilter}`, {
+        method: 'PATCH',
+        headers: { ...authHeaders, 'Prefer': 'return=representation' },
+        body: JSON.stringify(updateBody)
+      });
+    } else {
+      const defaults = {
+        highlevel: { name: 'GoHighLevel', category: 'CRM y Pipelines', initials: 'HL', description: 'Sincronización bidireccional de pacientes, oportunidades en embudos y turnos.' },
+        whatsapp: { name: 'WhatsApp Business API', category: 'Mensajería y Notificaciones', initials: 'WA', description: 'Envío automático de confirmaciones de turno, recordatorios y recetarios PDF.' },
+        mercadopago: { name: 'Mercado Pago', category: 'Pasarela de Pagos', initials: 'MP', description: 'Cobro de consultas y señas con links de pago y conciliación automática.' },
+        arca: { name: 'ARCA (ex AFIP)', category: 'Facturación Electrónica', initials: 'AR', description: 'Emisión oficial de Facturas A, B y C con CAE y código QR RG 4291.' },
+        ai: { name: 'Proveedor de Inteligencia Artificial', category: 'IA Clínica & Copiloto', initials: 'IA', description: 'Asistente para resúmenes de historia clínica, comparativas y presupuestos.' }
+      };
+      const meta = defaults[integId] || { name: integId, category: 'Integración', initials: integId.slice(0, 2).toUpperCase(), description: '' };
+      res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations`, {
+        method: 'POST',
+        headers: { ...authHeaders, 'Prefer': 'return=representation' },
+        body: JSON.stringify({ id: integId, workspace_id: currentWorkspaceId, ...meta, ...updateBody })
+      });
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw Error(err.message || 'Error al guardar configuración de integración.');
@@ -476,7 +502,9 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
   const integDiscMatch = path.match(/^\/api\/admin\/integrations\/([^/]+)\/disconnect$/);
   if (integDiscMatch && method === 'POST') {
     const integId = integDiscMatch[1];
-    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.${integId}`, {
+    const existing = await fetchWorkspaceIntegration(integId);
+    const wsFilter = existing?.workspace_id ? `&workspace_id=eq.${encodeURIComponent(existing.workspace_id)}` : '';
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.${integId}${wsFilter}`, {
       method: 'PATCH',
       headers: authHeaders,
       body: JSON.stringify({ status: 'NOT_CONNECTED', updated_at: new Date().toISOString() })
@@ -499,8 +527,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
   const integTestMatch = path.match(/^\/api\/admin\/integrations\/([^/]+)\/test$/);
   if (integTestMatch && method === 'POST') {
     const integId = integTestMatch[1];
-    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.${integId}&limit=1`, { headers: authHeaders });
-    const item = (await res.json().catch(() => []))?.[0];
+    const item = await fetchWorkspaceIntegration(integId);
     if (!item) throw Error('Integración no encontrada.');
     if (item.status !== 'CONNECTED') {
       throw Error(`${item.name} no está conectada. Configura y activa las credenciales primero.`);
@@ -561,7 +588,8 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     const records = (await recRes?.json?.().catch(() => [])) || [];
     const inventory = (await invRes?.json?.().catch(() => [])) || [];
     const settings = (await setRes?.json?.().catch(() => []))?.[0]?.value || { pauseBilling: false, pauseWebhooks: false, pauseAssistant: false };
-    const integrations = (await integRes?.json?.().catch(() => [])) || [];
+    const rawIntegrations = (await integRes?.json?.().catch(() => [])) || [];
+    const integrations = rawIntegrations.filter(i => !i.workspace_id || i.workspace_id === currentWorkspaceId);
     const rawUsers = (await usrRes?.json?.().catch(() => [])) || [];
     const rawAgendas = (await agRes?.json?.().catch(() => [])) || [];
     const rawQuotes = (await qtRes?.json?.().catch(() => [])) || [];
@@ -1657,8 +1685,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
   }
 
   if (path === '/api/invoices' && method === 'POST') {
-    const integRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.arca&limit=1`, { headers: authHeaders });
-    const arca = (await integRes.json().catch(() => []))?.[0];
+    const arca = await fetchWorkspaceIntegration('arca');
     if (!arca || arca.status !== 'CONNECTED') {
       throw Error('La integración oficial con ARCA (ex AFIP) no está conectada. Configura tus credenciales fiscales en Integraciones antes de emitir comprobantes.');
     }
@@ -1989,8 +2016,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
   }
 
   if (path === '/api/copilot' && method === 'POST') {
-    const integRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.ai&limit=1`, { headers: authHeaders });
-    const aiInteg = (await integRes.json().catch(() => []))?.[0];
+    const aiInteg = await fetchWorkspaceIntegration('ai');
     if (!aiInteg || aiInteg.status !== 'CONNECTED') {
       const cmd = (body?.text || '').toLowerCase();
       const todayAppts = (S.data?.appointments || []).filter(a => a.status !== 'CANCELLED');
@@ -2036,8 +2062,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
   }
 
   if (path === '/api/leads/ai-triage' || /^\/api\/leads\/[^/]+\/ai-triage$/.test(path)) {
-    const integRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.ai&limit=1`, { headers: authHeaders });
-    const aiInteg = (await integRes.json().catch(() => []))?.[0];
+    const aiInteg = await fetchWorkspaceIntegration('ai');
     if (!aiInteg || aiInteg.status !== 'CONNECTED') {
       throw Error('El proveedor de Inteligencia Artificial no está conectado. Configura tu API Key en Integraciones para ejecutar triaje con IA.');
     }
@@ -2101,8 +2126,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
 
   if (path.endsWith('/send-email') || path.endsWith('/whatsapp-reminder') || path === '/api/payments/mercadopago/preference') {
     const integId = path.endsWith('/whatsapp-reminder') ? 'whatsapp' : (path === '/api/payments/mercadopago/preference' ? 'mercadopago' : 'whatsapp');
-    const integRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.${integId}&limit=1`, { headers: authHeaders });
-    const integ = (await integRes.json().catch(() => []))?.[0];
+    const integ = await fetchWorkspaceIntegration(integId);
     if (!integ || integ.status !== 'CONNECTED') {
       throw Error(`La integración con ${integ?.name || integId} no está conectada. Actívala en Integraciones.`);
     }
