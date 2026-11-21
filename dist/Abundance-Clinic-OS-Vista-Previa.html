@@ -6026,6 +6026,7 @@ function recordsView() {
           <div class="flex" style="gap:8px;flex-wrap:wrap">
             <button class="btn small" data-action="edit-medical-history" data-id="${p.id}">${icon('shield', 13)} Editar Antecedentes</button>
             <button class="text-link" data-action="patient-detail" data-id="${p.id}">Ficha integral ${icon('arrow', 12)}</button>
+            <button type="button" class="btn small ghost" data-action="clear-record-patient" title="Cerrar ficha del paciente y volver al listado (Esc)">✕ Cerrar</button>
           </div>
         </div>
 
@@ -9749,6 +9750,10 @@ document.addEventListener('click', async e => {
         S.session = null;
         S.data = null;
         S.admin = null;
+        S.selectedPatient = null;
+        S.patientPickerOpen = false;
+        S.recordPatientSearch = '';
+        S.supportMode = null;
         closeModal();
         if (!PREVIEW) history.pushState({}, '', '/login');
         loginPage();
@@ -11239,6 +11244,21 @@ async function boot() {
     loginPage();
   }
 }
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const openModalEl = document.querySelector('.modal-backdrop, #modal:not(:empty)');
+  if (openModalEl) {
+    closeModal();
+    return;
+  }
+  if (S.view === 'records' && (S.selectedPatient || S.patientPickerOpen || S.recordPatientSearch)) {
+    S.selectedPatient = null;
+    S.patientPickerOpen = false;
+    S.recordPatientSearch = '';
+    contentOnly();
+  }
+});
 
 boot();
 })();
