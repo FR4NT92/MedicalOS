@@ -1341,13 +1341,22 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     const records = rawRecs.map(r => {
       let parsed = {};
       try { parsed = typeof r.content === 'object' ? r.content : JSON.parse(r.content || '{}'); } catch {}
+      const atts = Array.isArray(parsed.attachments) ? parsed.attachments
+        : (Array.isArray(parsed.files) ? parsed.files : (Array.isArray(r.attachments) ? r.attachments : []));
       return {
         id: r.id,
         type: r.type,
         title: parsed.title || parsed.problem || (r.type === 'STUDY' ? 'Estudio / Laboratorio' : 'Evolución médica'),
         specialty: parsed.specialty || '',
         notes: parsed.notes || '',
-        attachments: parsed.attachments || [],
+        diagnosis: parsed.diagnosis || '',
+        prepNotes: parsed.prepNotes || '',
+        html: parsed.html || '',
+        subjective: parsed.subjective || '',
+        objective: parsed.objective || '',
+        assessment: parsed.assessment || '',
+        plan: parsed.plan || '',
+        attachments: atts,
         createdAt: r.created_at,
         author: r.author
       };
@@ -3024,15 +3033,28 @@ function portalTabEstudios(records) {
               </div>
               <span class="badge blue">${esc(rec.type || 'STUDY')}</span>
             </div>
-            ${rec.notes ? `<p style="font-size:12.5px;color:#475569;margin:8px 0">${esc(rec.notes)}</p>` : ''}
+            ${rec.diagnosis ? `<div class="tiny" style="color:#18362b;font-weight:600;margin:6px 0 4px">Diagnóstico / Motivo: ${esc(rec.diagnosis)}</div>` : ''}
+            ${rec.notes ? `<p style="font-size:12.5px;color:#475569;margin:8px 0;white-space:pre-line">${esc(rec.notes)}</p>` : ''}
+            ${rec.prepNotes ? `<div style="font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin:6px 0"><b>Indicaciones de preparación:</b> ${esc(rec.prepNotes)}</div>` : ''}
+            ${!rec.notes && (rec.subjective || rec.objective || rec.assessment || rec.plan) ? `
+              <div style="font-size:12.5px;color:#475569;margin:8px 0;display:grid;gap:4px">
+                ${rec.subjective ? `<div><b>Motivo / Subjetivo:</b> ${esc(rec.subjective)}</div>` : ''}
+                ${rec.objective ? `<div><b>Examen / Objetivo:</b> ${esc(rec.objective)}</div>` : ''}
+                ${rec.assessment ? `<div><b>Evaluación:</b> ${esc(rec.assessment)}</div>` : ''}
+                ${rec.plan ? `<div><b>Plan / Indicaciones:</b> ${esc(rec.plan)}</div>` : ''}
+              </div>
+            ` : ''}
+            ${rec.html ? `<div style="font-size:12.5px;color:#334155;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin:8px 0;overflow-x:auto">${rec.html}</div>` : ''}
             ${rec.attachments && rec.attachments.length ? `
               <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #e2e8f0">
-                <span class="tiny muted" style="display:block;margin-bottom:6px">Archivos adjuntos:</span>
-                ${rec.attachments.map(att => `
-                  <button class="attachment-chip" data-action="view-attachment" data-url="${esc(att.url || att.data || att.dataUrl || '')}" data-name="${esc(att.name)}" data-type="${esc(att.type)}">
-                    ${icon('download', 12)} Ver ${esc(att.name)} (${Math.round((att.size || 0)/1024)} KB)
-                  </button>
-                `).join('')}
+                <span class="tiny muted" style="display:block;margin-bottom:6px">Archivos adjuntos (${rec.attachments.length}):</span>
+                <div class="flex" style="gap:8px;flex-wrap:wrap">
+                  ${rec.attachments.map(att => `
+                    <button class="attachment-chip" type="button" data-action="view-attachment" data-url="${esc(att.url || att.data || att.dataUrl || '')}" data-name="${esc(att.name || 'Documento')}" data-type="${esc(att.type || '')}">
+                      ${icon('download', 12)} Ver ${esc(att.name || 'Archivo')} ${att.size ? `(${Math.round(att.size / 1024)} KB)` : ''}
+                    </button>
+                  `).join('')}
+                </div>
               </div>
             ` : ''}
           </div>
@@ -3293,18 +3315,32 @@ function contentOnly() {
   if (e) e.innerHTML = content();
 }
 
+function isAppointmentPast(a) {
+  const startMs = Date.parse(a?.startAt || '');
+  if (!Number.isFinite(startMs)) return false;
+  const endMs = a?.endAt ? Date.parse(a.endAt) : (startMs + (Number(a?.duration) || 30) * 60000);
+  return Date.now() > (Number.isFinite(endMs) ? endMs : startMs);
+}
+
 function appointmentRow(a, i = 0) {
   const p = patientBy(a.patientId), n = nameOf(p);
-  return `<div class="appointment-row" data-action="appointment-detail" data-id="${a.id}" tabindex="0" role="button" aria-label="Ver turno de ${esc(n)}">
+  const past = isAppointmentPast(a);
+  const stillOpen = past && ['PENDING', 'CONFIRMED', 'IN_PROGRESS'].includes(a.status);
+  return `<div class="appointment-row" data-action="appointment-detail" data-id="${a.id}" tabindex="0" role="button" aria-label="Ver turno de ${esc(n)}" style="${stillOpen ? 'opacity:0.65;background:#f8fafc' : ''}">
     <div class="time">${fmtTime(a.startAt)}<small>${a.duration} min</small></div>
     <div class="flex" style="gap:9px">${avatar(n, i)}<div class="grow"><div class="patient-name">${esc(n)}</div><div class="patient-sub">${esc(types[a.type])} · ${esc(doctorBy(a.doctorId)?.name || '')}</div></div></div>
-    <div>${badge(a.status)}</div>
+    <div class="flex" style="gap:6px;align-items:center">
+      ${stillOpen ? '<span class="badge" style="background:#e2e8f0;color:#475569;font-size:10px">Ya pasó</span>' : ''}
+      ${badge(a.status)}
+    </div>
     ${icon('chevron', 12)}
   </div>`;
 }
 
 function homeView() {
   const m = derived(), shown = S.homeFilter === 'pending' ? m.a.filter(a => a.status === 'PENDING') : m.a;
+  const upcomingShown = shown.filter(a => !isAppointmentPast(a) || a.status === 'COMPLETED');
+  const pastOpenShown = shown.filter(a => isAppointmentPast(a) && a.status !== 'COMPLETED');
   const dStr = fmtDate(S.data.date);
   const dateFormatted = dStr.charAt(0).toUpperCase() + dStr.slice(1);
   return heading(dateFormatted, '',
@@ -3338,7 +3374,13 @@ function homeView() {
       </button>
 
       <div class="agenda-items-wrap ${S.agendaCollapsed ? 'collapsed' : ''}">
-        ${shown.map(appointmentRow).join('') || empty('Agenda despejada', 'No hay turnos registrados para este filtro.')}
+        ${upcomingShown.map(appointmentRow).join('') || (pastOpenShown.length ? '<div class="tiny muted" style="padding:14px 16px">No quedan turnos próximos por atender en el resto del día.</div>' : empty('Agenda despejada', 'No hay turnos registrados para este filtro.'))}
+        ${pastOpenShown.length ? `
+          <details style="border-top:1px dashed var(--border);padding:8px 14px;background:#fafcfb">
+            <summary class="tiny muted" style="cursor:pointer;font-weight:600;user-select:none">Turnos anteriores de hoy que ya pasaron (${pastOpenShown.length}) · Clic para ver o cerrar estado</summary>
+            <div style="margin-top:8px">${pastOpenShown.map(appointmentRow).join('')}</div>
+          </details>
+        ` : ''}
       </div>
 
       <div class="mini-progress">
@@ -3587,10 +3629,12 @@ function scheduleView() {
       const keys = new Set(Array.from({ length: 18 }, (_, i) => `${String(9 + Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`));
       for (const a of chosen) keys.add(fmtTime(a.startAt));
       mainScheduleHtml = [...keys].sort().map(t => {
+        const slotIso = localAt(S.date, t);
+        const slotPast = Date.parse(slotIso) < Date.now();
         const active = chosen.filter(a => fmtTime(a.startAt) === t && a.status !== 'CANCELLED');
-        const busy = chosen.filter(a => a.status !== 'CANCELLED' && a.startAt <= localAt(S.date, t) && a.endAt > localAt(S.date, t));
-        const canBook = busy.length < (S.doctor ? 1 : S.data.doctors.length);
-        return `<div class="slot">
+        const busy = chosen.filter(a => a.status !== 'CANCELLED' && a.startAt <= slotIso && a.endAt > slotIso);
+        const canBook = !slotPast && busy.length < (S.doctor ? 1 : S.data.doctors.length);
+        return `<div class="slot" style="${slotPast ? 'opacity:0.65' : ''}">
           <span class="slot-time">${t}</span>
           <div class="slot-content">
             ${active.map(a => {
@@ -6790,18 +6834,19 @@ function viewAttachmentModal(recordIdOrUrl, fileIdxOrName = 0, explicitType = ''
     att = r?.content?.attachments?.[fileIdxOrName] || r?.attachments?.[fileIdxOrName];
     if (r) subtitle = `${r.content?.title || r.content?.problem || r.title || 'Documento adjunto'} · ${fmtDate(r.createdAt, true)}`;
   }
-  if (!att?.data) return toast('Archivo adjunto no disponible.', true);
-  const isPdf = att.type === 'application/pdf' || (att.name || '').toLowerCase().endsWith('.pdf') || att.data.startsWith('data:application/pdf');
+  const src = att?.data || att?.dataUrl || att?.url || '';
+  if (!src) return toast('Archivo adjunto no disponible.', true);
+  const isPdf = att.type === 'application/pdf' || (att.name || '').toLowerCase().endsWith('.pdf') || src.startsWith('data:application/pdf');
   showModal(att.name || 'Archivo adjunto', subtitle,
     `<div style="text-align:center;margin-bottom:12px">
       ${isPdf
-        ? `<iframe src="${att.data}" style="width:100%;height:500px;border:1px solid #cbd5e1;border-radius:8px"></iframe>`
-        : `<img src="${att.data}" style="max-width:100%;max-height:500px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)" alt="${esc(att.name || 'Adjunto')}">`
+        ? `<iframe src="${src}" style="width:100%;height:500px;border:1px solid #cbd5e1;border-radius:8px"></iframe>`
+        : `<img src="${src}" style="max-width:100%;max-height:500px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)" alt="${esc(att.name || 'Adjunto')}">`
       }
     </div>
     <div class="dialog-actions">
       <button class="btn" data-action="close-modal">Cerrar</button>
-      <a href="${att.data}" download="${esc(att.name || 'archivo')}" class="btn primary">${icon('download', 14)} Descargar Archivo</a>
+      <a href="${src}" download="${esc(att.name || 'archivo')}" class="btn primary">${icon('download', 14)} Descargar Archivo</a>
     </div>`,
     '', 'wide'
   );
