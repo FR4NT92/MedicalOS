@@ -1096,9 +1096,23 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     return updated;
   }
 
+  const rpc = async (fnName, payload = {}) => {
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/rpc/${fnName}`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_CONFIG.anonKey,
+        'Authorization': `Bearer ${SUPABASE_CONFIG.anonKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) throw Error(json?.message || json?.error_description || `Error en ${fnName}`);
+    return json;
+  };
+
   if (path === '/api/portal/clinics' && method === 'GET') {
-    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?select=id,name,status&status=eq.ACTIVE&order=name.asc`, { headers: authHeaders }).catch(() => null);
-    const list = (await res?.json?.().catch(() => [])) || [];
+    const list = await rpc('portal_list_clinics', {});
     return { clinics: Array.isArray(list) ? list : [] };
   }
 
@@ -1106,31 +1120,22 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     const dni = (body?.dni || '').trim().replace(/\D/g, '');
     const phoneIn = (body?.phone || '').trim().replace(/\D/g, '');
     const targetWs = body?.workspaceId || S.portal?.clinicId || '';
-    const wsFilter = targetWs ? `&workspace_id=eq.${encodeURIComponent(targetWs)}` : '';
-    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?select=*&dni=eq.${encodeURIComponent(dni)}${wsFilter}`, { headers: authHeaders }).catch(() => null);
-    const pats = (await res?.json?.()) || [];
-    if (!pats.length) {
+    const res = await rpc('portal_lookup_patient', { p_dni: dni, p_phone: phoneIn, p_workspace_id: targetWs || null });
+    if (!res?.exists) {
       return { ok: true, exists: false, message: 'No encontramos una ficha registrada con este DNI.' };
     }
-    const matchingPats = pats.filter(pat => {
-      const patPhone = String(pat.phone || '').replace(/\D/g, '');
-      if (patPhone.length < 6 || phoneIn.length < 6) return true;
-      return patPhone.endsWith(phoneIn.slice(-6)) || phoneIn.endsWith(patPhone.slice(-6));
-    });
-    if (!matchingPats.length) {
+    if (!res.phone_matched || !res.matches?.length) {
       throw Error('El teléfono ingresado no coincide con el registrado en tu ficha médica.');
     }
+    const matchingPats = res.matches;
     if (matchingPats.length > 1 && !targetWs) {
-      const wsIds = Array.from(new Set(matchingPats.map(x => x.workspace_id).filter(Boolean)));
-      const wsRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?select=id,name&id=in.(${wsIds.map(encodeURIComponent).join(',')})`, { headers: authHeaders }).catch(() => null);
-      const wsList = (await wsRes?.json?.().catch(() => [])) || [];
       return {
         ok: true,
         exists: true,
         multiClinic: true,
         clinics: matchingPats.map(mp => ({
           workspaceId: mp.workspace_id,
-          clinicName: wsList.find(w => w.id === mp.workspace_id)?.name || mp.workspace_id,
+          clinicName: mp.clinic_name || mp.workspace_id,
           patientId: mp.id
         }))
       };
@@ -1180,67 +1185,45 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
   if (path === '/api/portal/auth/register' && method === 'POST') {
     const newId = 'pat-' + makeId().slice(0, 8);
     const wsId = body.workspaceId || S.portal?.clinicId || 'clinic-central';
-    const newPat = {
-      id: newId,
-      workspace_id: wsId,
-      first_name: body.firstName,
-      last_name: body.lastName || '',
-      dni: String(body.dni || '').trim().replace(/\D/g, ''),
-      phone: body.phone,
-      email: body.email || '',
-      coverage: body.coverage || 'Particular',
-      affiliate_number: body.affiliateNumber || null,
-      birth_date: body.birthDate || null,
-      status: 'ACTIVE',
-      notes: 'Registrado online vía Portal Pacientes (Aceptó Ley 25.326 / 26.529)',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients`, {
-      method: 'POST',
-      headers: { ...authHeaders, 'Prefer': 'return=representation' },
-      body: JSON.stringify(newPat)
+    const created = await rpc('portal_register_patient', {
+      p_id: newId,
+      p_workspace_id: wsId,
+      p_first_name: body.firstName,
+      p_last_name: body.lastName || '',
+      p_dni: String(body.dni || '').trim().replace(/\D/g, ''),
+      p_phone: body.phone,
+      p_email: body.email || '',
+      p_coverage: body.coverage || 'Particular',
+      p_affiliate_number: body.affiliateNumber || null,
+      p_birth_date: body.birthDate || null
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw Error(err.message || 'Error al registrar ficha de paciente.');
-    }
     return {
       ok: true,
       token: 'ptok_' + newId,
-      patient: { ...newPat, workspaceId: newPat.workspace_id, firstName: newPat.first_name, lastName: newPat.last_name }
+      patient: {
+        ...created,
+        workspaceId: created.workspace_id,
+        firstName: created.first_name,
+        lastName: created.last_name
+      }
     };
   }
 
   if (path === '/api/portal/data' && method === 'GET') {
     const pTok = headers['Authorization']?.slice(7) || S.portal?.token || localStorage.getItem('portal_token');
-    const patId = pTok?.replace('ptok_', '');
-    const patRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?id=eq.${patId}&limit=1`, { headers: authHeaders });
-    const p = (await patRes.json())?.[0] || S.portal?.patient;
-    if (!p?.id) throw Error('Sesión de paciente expirada. Ingresa nuevamente.');
-    const wsId = p.workspace_id || p.workspaceId || 'clinic-central';
-
-    const [wsRes, docRes, agRes, apptRes, busyRes, recRes, presRes, invRes, cstRes] = await Promise.all([
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?id=eq.${wsId}&limit=1`, { headers: authHeaders }).catch(() => null),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/doctors?workspace_id=eq.${wsId}`, { headers: authHeaders }).catch(() => null),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/agendas?workspace_id=eq.${wsId}`, { headers: authHeaders }).catch(() => null),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?patient_id=eq.${patId}&order=start_at.desc`, { headers: authHeaders }).catch(() => null),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?select=doctor_id,start_at,duration&workspace_id=eq.${wsId}&status=neq.CANCELLED`, { headers: authHeaders }).catch(() => null),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/records?patient_id=eq.${patId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/prescriptions?patient_id=eq.${patId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/invoices?patient_id=eq.${patId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
-      fetch(`${SUPABASE_CONFIG.url}/rest/v1/consents?patient_id=eq.${patId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null)
-    ]);
-
-    const ws = (await wsRes?.json?.().catch(() => []))?.[0] || { id: wsId, name: 'Clínica Médica' };
-    const doctors = (await docRes?.json?.().catch(() => [])) || [];
-    const agendas = (await agRes?.json?.().catch(() => [])) || [];
-    const rawAppts = (await apptRes?.json?.().catch(() => [])) || [];
-    const rawBusy = (await busyRes?.json?.().catch(() => [])) || [];
-    const rawRecs = (await recRes?.json?.().catch(() => [])) || [];
-    const rawPresc = (await presRes?.json?.().catch(() => [])) || [];
-    const rawInvs = (await invRes?.json?.().catch(() => [])) || [];
-    const rawCsts = (await cstRes?.json?.().catch(() => [])) || [];
+    const patId = pTok?.replace('ptok_', '') || S.portal?.patient?.id;
+    if (!patId) throw Error('Sesión de paciente expirada. Ingresa nuevamente.');
+    const data = await rpc('portal_get_data', { p_patient_id: patId });
+    const p = data.patient;
+    const ws = data.workspace || { id: p.workspace_id, name: 'Clínica Médica' };
+    const doctors = data.doctors || [];
+    const agendas = data.agendas || [];
+    const rawAppts = data.appointments || [];
+    const rawBusy = data.busySlots || [];
+    const rawRecs = data.records || [];
+    const rawPresc = data.prescriptions || [];
+    const rawInvs = data.invoices || [];
+    const rawCsts = data.consents || [];
 
     const appointments = rawAppts.map(a => {
       const doc = doctors.find(d => d.id === a.doctor_id);
@@ -1271,12 +1254,6 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
         author: r.author
       };
     });
-    const prescriptions = rawPresc.map(pr => ({
-      id: pr.id,
-      content: pr.content,
-      status: pr.status,
-      createdAt: pr.created_at
-    }));
     const invoices = rawInvs.map(inv => ({
       id: inv.id,
       concept: inv.concept,
@@ -1302,7 +1279,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     return {
       patient: {
         id: p.id,
-        workspaceId: wsId,
+        workspaceId: p.workspace_id,
         firstName: p.first_name || p.firstName,
         lastName: p.last_name || p.lastName,
         dni: p.dni,
@@ -1343,119 +1320,51 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
   if (path === '/api/portal/appointments' && method === 'POST') {
     const pTok = headers['Authorization']?.slice(7) || S.portal?.token || localStorage.getItem('portal_token');
     const patId = pTok?.replace('ptok_', '') || S.portal?.patient?.id;
-    const wsId = S.portal?.patient?.workspaceId || 'clinic-central';
     const startAt = `${body.date}T${body.time}:00-03:00`;
-    const reqStartMs = Date.parse(startAt);
-    const reqEndMs = reqStartMs + (Number(body.duration) || 30) * 60000;
-
-    // Verificar superposición de agenda del profesional
-    const checkRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?select=id,start_at,duration&workspace_id=eq.${wsId}&doctor_id=eq.${encodeURIComponent(body.doctorId)}&status=neq.CANCELLED`, { headers: authHeaders }).catch(() => null);
-    const existingAppts = (await checkRes?.json?.().catch(() => [])) || [];
-    const clash = existingAppts.find(ex => {
-      const s = Date.parse(ex.start_at);
-      const e = s + (Number(ex.duration) || 30) * 60000;
-      return reqStartMs < e && reqEndMs > s;
+    const reqEndIso = new Date(Date.parse(startAt) + (Number(body.duration) || 30) * 60000).toISOString();
+    const res = await rpc('portal_create_appointment', {
+      p_id: 'app-' + makeId().slice(0, 8),
+      p_patient_id: patId,
+      p_doctor_id: body.doctorId,
+      p_agenda_id: body.agendaId || null,
+      p_start_at: startAt,
+      p_end_at: reqEndIso,
+      p_duration: Number(body.duration) || 30,
+      p_type: body.type || 'CONSULTATION',
+      p_notes: body.notes || 'Turno solicitado online por el paciente'
     });
-    if (clash) {
-      throw Error('Ese horario ya se encuentra reservado para el profesional seleccionado. Por favor elige otro horario.');
-    }
-
-    const newAppt = {
-      id: 'app-' + makeId().slice(0, 8),
-      workspace_id: wsId,
-      patient_id: patId,
-      doctor_id: body.doctorId,
-      agenda_id: body.agendaId || null,
-      start_at: startAt,
-      end_at: new Date(reqEndMs).toISOString(),
-      duration: Number(body.duration) || 30,
-      type: body.type || 'CONSULTATION',
-      status: 'CONFIRMED',
-      notes: body.notes || 'Turno solicitado online por el paciente',
-      created_at: new Date().toISOString()
-    };
-    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments`, {
-      method: 'POST',
-      headers: { ...authHeaders, 'Prefer': 'return=representation' },
-      body: JSON.stringify(newAppt)
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw Error(err.message || 'No se pudo reservar el turno.');
-    }
-    return { ok: true, appointment: newAppt };
+    return { ok: true, appointment: res };
   }
 
   if (path.startsWith('/api/portal/appointments/') && path.endsWith('/cancel') && method === 'POST') {
     const id = path.slice('/api/portal/appointments/'.length, -'/cancel'.length);
-    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?id=eq.${id}`, {
-      method: 'PATCH',
-      headers: authHeaders,
-      body: JSON.stringify({ status: 'CANCELLED' })
-    });
-    if (!res.ok) throw Error('No se pudo cancelar el turno.');
+    const pTok = headers['Authorization']?.slice(7) || S.portal?.token || localStorage.getItem('portal_token');
+    const patId = pTok?.replace('ptok_', '') || S.portal?.patient?.id;
+    await rpc('portal_cancel_appointment', { p_patient_id: patId, p_appointment_id: id });
     return { ok: true };
   }
 
   if (path === '/api/portal/upload-study' && method === 'POST') {
     const pTok = headers['Authorization']?.slice(7) || S.portal?.token || localStorage.getItem('portal_token');
     const patId = pTok?.replace('ptok_', '') || S.portal?.patient?.id;
-    const wsId = S.portal?.patient?.workspaceId || 'clinic-central';
     let attachments = [];
     try { attachments = JSON.parse(body.attachmentPayload || body.attachmentsJson || '[]'); } catch {}
-
-    if (body.studyType === 'PAYMENT_RECEIPT') {
-      const amountCents = Math.max(100, Math.round((Number(body.amount) || 0) * 100));
-      const newPay = {
-        id: 'pay-' + makeId().slice(0, 8),
-        workspace_id: wsId,
-        patient_id: patId,
-        amount_cents: amountCents,
-        movement_type: 'INCOME',
-        category: 'FULL_PAYMENT',
-        method: 'TRANSFERENCIA',
-        reference: `Comprobante Portal Paciente: ${body.title || 'Pago tratamiento'}${body.notes ? ' · ' + body.notes : ''}`,
-        idempotency_key: makeId(),
-        status: 'APPROVED',
-        created_at: new Date().toISOString()
-      };
-      const payRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/payments`, {
-        method: 'POST',
-        headers: { ...authHeaders, 'Prefer': 'return=representation' },
-        body: JSON.stringify(newPay)
-      });
-      if (!payRes.ok) throw Error('No se pudo registrar el comprobante de pago en la clínica.');
-      return { ok: true, message: 'Comprobante de pago enviado y registrado en Cobros de tu clínica.' };
-    }
-
-    const newRec = {
-      id: 'rec-' + makeId().slice(0, 8),
-      workspace_id: wsId,
-      patient_id: patId,
-      type: body.studyType || 'STUDY',
-      content: {
-        title: body.title,
-        studyType: body.studyType,
-        specialty: body.specialty,
-        notes: body.notes,
-        attachments,
-        uploadedVia: 'PORTAL_PACIENTES'
-      },
-      author: 'Paciente (Portal)',
-      created_at: new Date().toISOString(),
-      previous_hash: 'PORTAL-GENESIS',
-      hash: 'sha256-' + makeId() + makeId()
-    };
-    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/records`, {
-      method: 'POST',
-      headers: { ...authHeaders, 'Prefer': 'return=representation' },
-      body: JSON.stringify(newRec)
+    const res = await rpc('portal_upload_study', {
+      p_id: 'rec-' + makeId().slice(0, 8),
+      p_patient_id: patId,
+      p_type: body.studyType || 'STUDY',
+      p_title: body.title || 'Estudio / Documento',
+      p_specialty: body.specialty || '',
+      p_notes: body.notes || '',
+      p_attachments: attachments,
+      p_amount: Number(body.amount) || 0
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw Error(err.message || 'No se pudo subir el archivo a tu historia clínica.');
-    }
-    return { ok: true, message: 'Documento clasificado y guardado exitosamente en la ficha de tu clínica.' };
+    return {
+      ok: true,
+      message: res?.kind === 'payment'
+        ? 'Comprobante de pago enviado y registrado en Cobros de tu clínica.'
+        : 'Documento clasificado y guardado exitosamente en la ficha de tu clínica.'
+    };
   }
 
   // ==========================================
