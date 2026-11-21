@@ -4361,8 +4361,6 @@ function recordsView() {
     return true;
   });
 
-  const patMode = S.recordPatientsMode || 'normal';
-  const patLayoutClass = patMode === 'collapsed' ? 'patients-collapsed' : patMode === 'wide' ? 'patients-wide' : '';
   const patQuery = (S.recordPatientSearch || '').toLowerCase().trim();
   const visiblePatients = (S.data.patients || []).filter(pat =>
     !patQuery || [nameOf(pat), pat.dni, pat.coverage, pat.phone].some(x => String(x || '').toLowerCase().includes(patQuery))
@@ -4370,116 +4368,99 @@ function recordsView() {
 
   return heading('Historia Clínica Integral', 'Evoluciones médicas, estudios del portal del paciente, comparativa de evolución, órdenes de estudio y consentimientos inmutables.',
     `<div class="flex" style="gap:8px;flex-wrap:wrap">
-      ${p ? `<button class="btn small" data-action="export-complete-hce" data-id="${p.id}" title="Descargar copia completa de la Historia Clínica conforme Ley 26.529">${icon('download', 13)} Exportar HCE Completa (Ley 26.529)</button>` : ''}
+      ${p ? `<button class="btn small" data-action="export-complete-hce" data-id="${p.id}" title="Descargar copia completa de la Historia Clínica conforme Ley 26.529">${icon('download', 13)} Exportar HCE (Ley 26.529)</button>` : ''}
       <button class="btn small" data-action="new-study-order">${icon('file', 13)} Orden de Estudios</button>
       <button class="btn small" data-action="new-attachment">${icon('upload', 13)} Cargar Estudio / Lab</button>
       <button class="btn small" data-action="new-vitals">${icon('activity', 13)} Signos Vitales</button>
       <button class="btn small primary" data-action="new-record">${icon('plus', 13)} Nueva Evolución</button>
     </div>`
   ) +
-  `<div class="record-layout ${patLayoutClass}">
-    <section class="panel record-patients" style="${patMode === 'collapsed' ? 'padding:8px 6px;text-align:center' : ''}">
-      ${patMode === 'collapsed' ? `
-        <button type="button" class="icon-btn" data-action="toggle-record-patients-collapse" title="Desplegar lista de pacientes" style="margin:0 auto 8px">
-          ${icon('chevron', 16)}
-        </button>
-        <div class="tiny muted" style="writing-mode:vertical-rl;transform:rotate(180deg);margin:8px auto;font-weight:700;letter-spacing:1px">PACIENTES (${S.data.patients.length})</div>
-      ` : `
-        <div class="panel-header" style="padding:12px 14px;gap:6px">
-          <div class="flex" style="gap:6px;align-items:center">
-            <h2 style="font-size:14px">Pacientes</h2>
-            <span class="badge gray" style="font-size:10px">${visiblePatients.length}/${S.data.patients.length}</span>
-          </div>
-          <div class="flex" style="gap:4px">
-            <button type="button" class="icon-btn" data-action="toggle-record-patients-width" title="${patMode === 'wide' ? 'Ancho estándar' : 'Ampliar ancho de lista'}" style="width:28px;height:28px;font-size:11px;font-weight:700">
-              ${patMode === 'wide' ? '⇄' : '↔'}
-            </button>
-            <button type="button" class="icon-btn" data-action="toggle-record-patients-collapse" title="Contraer lista de pacientes" style="width:28px;height:28px;font-size:12px;font-weight:700">
-              «
-            </button>
-          </div>
-        </div>
-        <div style="padding:0 12px 10px">
-          <div class="omni-search-box" style="padding:5px 10px">
-            <span class="omni-search-icon">${icon('search', 13)}</span>
-            <input id="record-patient-search" type="search" class="omni-search-input" data-input="record-patient-search" placeholder="Buscar paciente o DNI..." value="${esc(S.recordPatientSearch || '')}" style="font-size:12px">
-          </div>
-        </div>
-        <div style="max-height:540px;overflow-y:auto">
-          ${visiblePatients.map((pat, i) => `<div class="patient-choice ${S.selectedPatient === pat.id ? 'active' : ''}" data-action="select-record-patient" data-id="${pat.id}" tabindex="0" role="button">
-            ${avatar(nameOf(pat), i)}
-            <div style="min-width:0"><div class="patient-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(nameOf(pat))}</div><div class="patient-sub">${esc(pat.dni ? `DNI ${pat.dni}` : 'Sin DNI')} · ${esc(pat.coverage || 'Particular')}</div></div>
-          </div>`).join('') || `<div class="tiny muted" style="padding:16px;text-align:center">Sin coincidencias</div>`}
-        </div>
-      `}
-    </section>
-
-    <div>
-      ${p ? `
-        <!-- Records Top Navigation Bar -->
-        <nav class="omni-top-tabs">
-          <button class="omni-tab-btn ${omniTab === 'evoluciones' ? 'active' : ''}" data-action="omni-tab" data-value="evoluciones">Evoluciones (${allPatientRecords.filter(isEvolutionRecord).length})</button>
-          <button class="omni-tab-btn ${omniTab === 'comparativa' ? 'active' : ''}" data-action="omni-tab" data-value="comparativa">Comparativa Paciente vs. Médico ${portalUploadsCount ? `(${portalUploadsCount})` : ''}</button>
-          <button class="omni-tab-btn ${omniTab === 'estudios' ? 'active' : ''}" data-action="omni-tab" data-value="estudios">Estudios e Imágenes</button>
-          <button class="omni-tab-btn ${omniTab === 'laboratorio' ? 'active' : ''}" data-action="omni-tab" data-value="laboratorio">Laboratorio</button>
-          <button class="omni-tab-btn ${omniTab === 'prescripciones' ? 'active' : ''}" data-action="omni-tab" data-value="prescripciones">Prescripciones (${prescriptions.length})</button>
-          <button class="omni-tab-btn ${omniTab === 'signos-vitales' ? 'active' : ''}" data-action="omni-tab" data-value="signos-vitales">Signos Vitales</button>
-          <button class="omni-tab-btn ${omniTab === 'documentos' ? 'active' : ''}" data-action="omni-tab" data-value="documentos">Documentos</button>
-          <button class="omni-tab-btn ${omniTab === 'consentimientos' ? 'active' : ''}" data-action="omni-tab" data-value="consentimientos">Consentimientos (${consents.length})</button>
-        </nav>
-
-        <section class="panel" style="margin-bottom:14px">
-          <div class="panel-header" style="padding:12px 18px">
-            <div class="flex">
-              ${avatar(nameOf(p))}
-              <div>
-                <h2>${esc(nameOf(p))}</h2>
-                <p class="panel-sub">${esc(p.coverage || 'Particular')} ${p.affiliateNumber ? `(Afiliado N° ${esc(p.affiliateNumber)})` : ''} · DNI ${esc(p.dni || '—')} ${p.cuitCuil ? `· CUIT/CUIL ${esc(p.cuitCuil)}` : ''} ${p.birthDate ? `· Edad: ${calcAge(p.birthDate)} años` : ''}</p>
+  `<div class="record-layout-full">
+    ${p ? `
+      <!-- Ficha de Paciente Activo + Selector Desplegable con Buscador -->
+      <section class="panel" style="margin-bottom:14px">
+        <div class="panel-header" style="padding:14px 18px;flex-wrap:wrap;gap:12px">
+          <div class="flex" style="min-width:0;flex:1 1 260px">
+            ${avatar(nameOf(p))}
+            <div style="min-width:0">
+              <div class="flex" style="gap:8px;flex-wrap:wrap;align-items:center">
+                <h2 style="margin:0">${esc(nameOf(p))}</h2>
+                <button type="button" class="btn small" data-action="toggle-patient-picker" style="background:#f0fdf4;border-color:#bbf7d0;color:#1b4c37;font-weight:700">
+                  ${icon('users', 13)} Cambiar / Buscar Paciente (${S.data.patients.length}) ${icon('down', 12)}
+                </button>
               </div>
-            </div>
-            <div class="flex" style="gap:8px">
-              <button class="btn small" data-action="edit-medical-history" data-id="${p.id}">${icon('shield', 13)} Editar Antecedentes</button>
-              <button class="text-link" data-action="patient-detail" data-id="${p.id}">Ficha integral ${icon('arrow', 12)}</button>
+              <p class="panel-sub" style="margin:2px 0 0">${esc(p.coverage || 'Particular')} ${p.affiliateNumber ? `(Afiliado N° ${esc(p.affiliateNumber)})` : ''} · DNI ${esc(p.dni || '—')} ${p.cuitCuil ? `· CUIT/CUIL ${esc(p.cuitCuil)}` : ''} ${p.birthDate ? `· Edad: ${calcAge(p.birthDate)} años` : ''}</p>
             </div>
           </div>
-
-          <!-- Módulo Desplegable de Antecedentes Médicos y Alergias (Ley 26.529) -->
-          <div style="padding:0 18px 12px">
-            ${medicalHistoryCard(p)}
+          <div class="flex" style="gap:8px;flex-wrap:wrap">
+            <button class="btn small" data-action="edit-medical-history" data-id="${p.id}">${icon('shield', 13)} Editar Antecedentes</button>
+            <button class="text-link" data-action="patient-detail" data-id="${p.id}">Ficha integral ${icon('arrow', 12)}</button>
           </div>
-        </section>
+        </div>
 
-        <!-- Split Container: Filter Sidebar + Timeline Feed -->
-        <div class="omni-container">
-          <!-- Left Filter Sidebar -->
-          <aside class="omni-sidebar">
-            <div class="omni-filter-group">
-              <div class="omni-search-box">
+        ${S.patientPickerOpen ? `
+          <div style="padding:12px 18px 16px;background:#f8fbf9;border-top:1px solid #e2e8e2;border-bottom:1px solid #e2e8e2">
+            <div class="between" style="margin-bottom:10px;gap:10px;flex-wrap:wrap">
+              <div class="omni-search-box" style="max-width:380px;flex:1">
                 <span class="omni-search-icon">${icon('search', 14)}</span>
-                <input type="search" class="omni-search-input" placeholder="Filtrar..." value="${esc(S.omniSearch || '')}" data-action="omni-search">
+                <input id="record-patient-search" type="search" class="omni-search-input" data-input="record-patient-search" placeholder="Buscar por nombre, DNI, cobertura o teléfono..." value="${esc(S.recordPatientSearch || '')}">
               </div>
+              <span class="tiny muted">Mostrando ${visiblePatients.length} de ${S.data.patients.length} pacientes</span>
             </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px;max-height:240px;overflow-y:auto">
+              ${visiblePatients.map((pat, i) => `
+                <button type="button" class="patient-choice ${S.selectedPatient === pat.id ? 'active' : ''}" data-action="select-record-patient" data-id="${pat.id}" style="text-align:left;border:1px solid ${S.selectedPatient === pat.id ? '#1b4c37' : '#e2e8e2'};border-radius:10px;padding:8px 10px;background:${S.selectedPatient === pat.id ? '#eaf4ec' : '#ffffff'}">
+                  ${avatar(nameOf(pat), i)}
+                  <div style="min-width:0">
+                    <div class="patient-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(nameOf(pat))}</div>
+                    <div class="patient-sub">${esc(pat.dni ? `DNI ${pat.dni}` : 'Sin DNI')} · ${esc(pat.coverage || 'Particular')}</div>
+                  </div>
+                </button>
+              `).join('') || `<div class="tiny muted" style="padding:12px">No se encontraron pacientes.</div>`}
+            </div>
+          </div>
+        ` : ''}
 
-            <div class="omni-filter-group">
-              <span class="omni-filter-title">Sección Clínica</span>
-              <button class="omni-filter-chip ${omniTab === 'evoluciones' ? 'active' : ''}" data-action="omni-tab" data-value="evoluciones">Evoluciones</button>
-              <button class="omni-filter-chip ${omniTab === 'comparativa' ? 'active' : ''}" data-action="omni-tab" data-value="comparativa">Comparativa Evolución</button>
-              <button class="omni-filter-chip ${omniTab === 'estudios' ? 'active' : ''}" data-action="omni-tab" data-value="estudios">Estudios / Imágenes</button>
-              <button class="omni-filter-chip ${omniTab === 'laboratorio' ? 'active' : ''}" data-action="omni-tab" data-value="laboratorio">Laboratorio</button>
-              <button class="omni-filter-chip ${omniTab === 'signos-vitales' ? 'active' : ''}" data-action="omni-tab" data-value="signos-vitales">Signos Vitales</button>
-            </div>
+        <!-- Módulo Desplegable de Antecedentes Médicos y Alergias (Ley 26.529) -->
+        <div style="padding:0 18px 12px">
+          ${medicalHistoryCard(p)}
+        </div>
+      </section>
 
-            <div class="omni-filter-group">
-              <span class="omni-filter-title">Fechas</span>
-              <div class="omni-date-row">
-                <span class="omni-date-label">Desde</span>
-                <input type="date" class="omni-date-input" value="${esc(S.omniFromDate || '')}" data-action="omni-from">
-              </div>
-              <div class="omni-date-row">
-                <span class="omni-date-label">Hasta</span>
-                <input type="date" class="omni-date-input" value="${esc(S.omniToDate || '')}" data-action="omni-to">
-              </div>
+      <!-- Barra Única de Secciones Clínicas (Sin duplicaciones) -->
+      <nav class="omni-top-tabs">
+        <button class="omni-tab-btn ${omniTab === 'evoluciones' ? 'active' : ''}" data-action="omni-tab" data-value="evoluciones">Evoluciones (${allPatientRecords.filter(isEvolutionRecord).length})</button>
+        <button class="omni-tab-btn ${omniTab === 'comparativa' ? 'active' : ''}" data-action="omni-tab" data-value="comparativa">Comparativa Paciente vs. Médico ${portalUploadsCount ? `(${portalUploadsCount})` : ''}</button>
+        <button class="omni-tab-btn ${omniTab === 'estudios' ? 'active' : ''}" data-action="omni-tab" data-value="estudios">Estudios e Imágenes</button>
+        <button class="omni-tab-btn ${omniTab === 'laboratorio' ? 'active' : ''}" data-action="omni-tab" data-value="laboratorio">Laboratorio</button>
+        <button class="omni-tab-btn ${omniTab === 'prescripciones' ? 'active' : ''}" data-action="omni-tab" data-value="prescripciones">Prescripciones (${prescriptions.length})</button>
+        <button class="omni-tab-btn ${omniTab === 'signos-vitales' ? 'active' : ''}" data-action="omni-tab" data-value="signos-vitales">Signos Vitales</button>
+        <button class="omni-tab-btn ${omniTab === 'documentos' ? 'active' : ''}" data-action="omni-tab" data-value="documentos">Documentos</button>
+        <button class="omni-tab-btn ${omniTab === 'consentimientos' ? 'active' : ''}" data-action="omni-tab" data-value="consentimientos">Consentimientos (${consents.length})</button>
+      </nav>
+
+      <!-- Contenedor Principal: Solo Filtros a la izquierda + Contenido a la derecha -->
+      <div class="omni-container">
+        <aside class="omni-sidebar">
+          <div class="omni-filter-group">
+            <span class="omni-filter-title">Filtros de Búsqueda</span>
+            <div class="omni-search-box">
+              <span class="omni-search-icon">${icon('search', 14)}</span>
+              <input type="search" class="omni-search-input" placeholder="Buscar en registros..." value="${esc(S.omniSearch || '')}" data-action="omni-search">
             </div>
+          </div>
+
+          <div class="omni-filter-group">
+            <span class="omni-filter-title">Fechas</span>
+            <div class="omni-date-row">
+              <span class="omni-date-label">Desde</span>
+              <input type="date" class="omni-date-input" value="${esc(S.omniFromDate || '')}" data-action="omni-from">
+            </div>
+            <div class="omni-date-row">
+              <span class="omni-date-label">Hasta</span>
+              <input type="date" class="omni-date-input" value="${esc(S.omniToDate || '')}" data-action="omni-to">
+            </div>
+          </div>
 
             ${problems.length ? `
               <div class="omni-filter-group">
@@ -4596,7 +4577,6 @@ function recordsView() {
           </main>
         </div>
       ` : empty('Selecciona un paciente', 'Selecciona un paciente para visualizar su historial.')}
-    </div>
   </div>`;
 }
 
@@ -8188,14 +8168,16 @@ document.addEventListener('click', async e => {
         }
         break;
       }
-      case 'select-record-patient': S.selectedPatient = id; logHceReadAccess(id); contentOnly(); break;
-      case 'toggle-record-patients-collapse':
-        S.recordPatientsMode = S.recordPatientsMode === 'collapsed' ? 'normal' : 'collapsed';
+      case 'select-record-patient':
+        S.selectedPatient = id;
+        S.patientPickerOpen = false;
+        logHceReadAccess(id);
         contentOnly();
         break;
-      case 'toggle-record-patients-width':
-        S.recordPatientsMode = S.recordPatientsMode === 'wide' ? 'normal' : 'wide';
+      case 'toggle-patient-picker':
+        S.patientPickerOpen = !S.patientPickerOpen;
         contentOnly();
+        if (S.patientPickerOpen) setTimeout(() => $('#record-patient-search')?.focus(), 30);
         break;
       case 'open-patient-records': S.selectedPatient = id; logHceReadAccess(id); closeModal(); await navigate('records'); break;
       case 'export-complete-hce': printCompleteHceDocument(id || S.selectedPatient); break;
