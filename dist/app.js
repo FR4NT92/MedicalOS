@@ -6781,13 +6781,10 @@ function medicalOrderDialog(patientId = null) {
   }, 50);
 }
 
-function hospitalDayView() {
-  const d = S.data;
-  const orders = d?.medicalOrders || [];
-  const inventory = d?.inventory || [];
-  const filter = S.hospitalDayFilter || 'ALL';
-
-  const defaultResources = [
+function getAmbulatoryResources() {
+  const custom = S.data?.settings?.ambulatoryResources;
+  if (Array.isArray(custom) && custom.length) return custom;
+  return [
     { id: 'sill-1', name: 'Sillón 1', type: 'SUEROTERAPIA', label: 'Sueroterapia / Infusión' },
     { id: 'sill-2', name: 'Sillón 2', type: 'SUEROTERAPIA', label: 'Sueroterapia / Infusión' },
     { id: 'sill-3', name: 'Sillón 3', type: 'SUEROTERAPIA', label: 'Sueroterapia / Infusión' },
@@ -6795,6 +6792,103 @@ function hospitalDayView() {
     { id: 'cam-1', name: 'Cámara Hiperbárica 1', type: 'CAMARA_HIPERBARICA', label: 'Medicina Hiperbárica' },
     { id: 'luz-1', name: 'Cabina Fotobiomodulación', type: 'FOTOBIOMODULACION', label: 'Terapia de Luz / LED' }
   ];
+}
+
+function getPatientBillingBadge(patientId) {
+  const patsPayments = (S.data?.payments || []).filter(p => p.patientId === patientId && p.movementType !== 'EXPENSE');
+  const totalPaid = patsPayments.reduce((s, p) => s + (p.amountCents || 0) / 100, 0);
+  const approvedQuote = (S.data?.quotes || []).find(q => q.patientId === patientId && q.status === 'APPROVED');
+  const todayAppt = (S.data?.appointments || []).find(a => a.patientId === patientId && a.status !== 'CANCELLED' && a.startAt && dateKey(a.startAt) === dateKey());
+  const payBadge = totalPaid > 0
+    ? `<span class="badge green" style="font-size:10px" title="Pagos/Señas registrados para este paciente">✓ Abonado: ${fmtMoney(totalPaid)}</span>`
+    : approvedQuote
+      ? `<span class="badge blue" style="font-size:10px">Presupuesto Aprobado (Pend. cobro)</span>`
+      : `<span class="badge amber" style="font-size:10px">Sin pago registrado</span>`;
+  const apptBadge = todayAppt ? `<span class="badge gray" style="font-size:10px">Turno hoy ${fmtTime(todayAppt.startAt)} hs</span>` : '';
+  return `${payBadge}${apptBadge}`;
+}
+
+function configAmbulatoryResourcesDialog() {
+  const list = getAmbulatoryResources();
+  showModal(
+    'Configurar Sillones, Cámaras y Boxes',
+    'Personaliza los recursos físicos de Terapias Ambulatorias para tu clínica (se guarda en la configuración del centro).',
+    `<form data-form="config-ambulatory-resources">
+      <div id="amb-res-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+        ${list.map(r => `
+          <div class="amb-res-row flex" style="gap:8px;align-items:center">
+            <input type="text" class="input amb-name grow" value="${esc(r.name)}" placeholder="Nombre (ej: Sillón 5, Box Ozono 1)" required>
+            <select class="input amb-type" style="width:185px">
+              <option value="SUEROTERAPIA" ${r.type === 'SUEROTERAPIA' ? 'selected' : ''}>Sueroterapia / Infusión</option>
+              <option value="CAMARA_HIPERBARICA" ${r.type === 'CAMARA_HIPERBARICA' ? 'selected' : ''}>Cámara Hiperbárica</option>
+              <option value="FOTOBIOMODULACION" ${r.type === 'FOTOBIOMODULACION' ? 'selected' : ''}>Fotobiomodulación</option>
+              <option value="OTRO" ${r.type === 'OTRO' ? 'selected' : ''}>Otro Box / Terapia</option>
+            </select>
+            <input type="text" class="input amb-label" value="${esc(r.label || '')}" placeholder="Descripción" style="width:160px">
+            <button type="button" class="icon-btn remove-amb-res" style="color:#b91c1c">${icon('close', 14)}</button>
+          </div>
+        `).join('')}
+      </div>
+      <button type="button" class="btn small" id="add-amb-res-btn">${icon('plus', 12)} Agregar Sillón / Box</button>
+      <input type="hidden" name="resourcesJson" id="amb-res-json" value="[]">
+      <div class="form-error" role="alert"></div>
+      <div class="dialog-actions">
+        ${btn('Cancelar', 'close-modal', '', '', 'type="button"')}
+        <button class="btn primary" type="submit">${icon('check', 14)} Guardar Recursos</button>
+      </div>
+    </form>`,
+    '', 'wide'
+  );
+  setTimeout(() => {
+    const listEl = $('#amb-res-list');
+    const sync = () => {
+      const rows = Array.from(listEl?.querySelectorAll('.amb-res-row') || []);
+      const data = rows.map((row, idx) => ({
+        id: 'res-' + (idx + 1),
+        name: row.querySelector('.amb-name')?.value?.trim() || '',
+        type: row.querySelector('.amb-type')?.value || 'SUEROTERAPIA',
+        label: row.querySelector('.amb-label')?.value?.trim() || 'Terapia Ambulatoria'
+      })).filter(x => x.name);
+      if ($('#amb-res-json')) $('#amb-res-json').value = JSON.stringify(data);
+    };
+    $('#add-amb-res-btn')?.addEventListener('click', () => {
+      const row = document.createElement('div');
+      row.className = 'amb-res-row flex';
+      row.style.gap = '8px';
+      row.style.alignItems = 'center';
+      row.innerHTML = `
+        <input type="text" class="input amb-name grow" placeholder="Nombre del Sillón o Box" required>
+        <select class="input amb-type" style="width:185px">
+          <option value="SUEROTERAPIA">Sueroterapia / Infusión</option>
+          <option value="CAMARA_HIPERBARICA">Cámara Hiperbárica</option>
+          <option value="FOTOBIOMODULACION">Fotobiomodulación</option>
+          <option value="OTRO">Otro Box / Terapia</option>
+        </select>
+        <input type="text" class="input amb-label" value="Sueroterapia / Infusión" placeholder="Descripción" style="width:160px">
+        <button type="button" class="icon-btn remove-amb-res" style="color:#b91c1c">${icon('close', 14)}</button>
+      `;
+      listEl?.appendChild(row);
+      sync();
+    });
+    listEl?.addEventListener('input', sync);
+    listEl?.addEventListener('change', sync);
+    listEl?.addEventListener('click', e => {
+      if (e.target.closest('.remove-amb-res') && listEl.children.length > 1) {
+        e.target.closest('.amb-res-row')?.remove();
+        sync();
+      }
+    });
+    sync();
+  }, 40);
+}
+
+function hospitalDayView() {
+  const d = S.data;
+  const orders = d?.medicalOrders || [];
+  const inventory = d?.inventory || [];
+  const filter = S.hospitalDayFilter || 'ALL';
+
+  const defaultResources = getAmbulatoryResources();
 
   const inProgressOrders = orders.filter(o => o.status === 'IN_PROGRESS');
   const pendingOrders = orders.filter(o => o.status === 'PENDING');
@@ -6816,8 +6910,11 @@ function hospitalDayView() {
   });
 
   return heading('Terapias Ambulatorias',
-    'Gestión de sillones de sueroterapia, cámara hiperbárica y fotobiomodulación con evolución de enfermería y descuento automático de insumos.',
-    `<button class="btn primary" data-action="new-hospital-day-order">${icon('plus', 14)} Nueva Indicación por Sesión</button>`
+    'Gestión configurable de sillones de sueroterapia, cámara hiperbárica y fotobiomodulación con control de pagos, evolución de enfermería y descuento automático de insumos.',
+    `<div class="flex" style="gap:8px;flex-wrap:wrap">
+      <button class="btn" data-action="config-ambulatory-resources">${icon('settings', 14)} Configurar Sillones / Boxes</button>
+      <button class="btn primary" data-action="new-hospital-day-order">${icon('plus', 14)} Nueva Indicación por Sesión</button>
+    </div>`
   ) + `
   <div class="stats" style="grid-template-columns:repeat(4,minmax(0,1fr))">
     ${stat('Sillones / Boxes Ocupados', `${inProgressOrders.length} / ${defaultResources.length}`, 'activity', `${inProgressOrders.length} pacientes en sesión activa`, inProgressOrders.length > 0)}
@@ -6865,7 +6962,10 @@ function hospitalDayView() {
                   <b style="font-size:13px;color:#18362b">${esc(nameOf(pat))}</b>
                   <span class="tiny muted">DNI ${esc(pat?.dni || '—')}</span>
                 </div>
-                <div style="font-size:12px;color:#334155;margin-top:4px">
+                <div class="flex" style="gap:4px;flex-wrap:wrap;margin-top:5px">
+                  ${getPatientBillingBadge(ord.patientId)}
+                </div>
+                <div style="font-size:12px;color:#334155;margin-top:5px">
                   <b>Terapia:</b> ${esc(ord.therapyType || 'Sueroterapia')} · Sesión ${ord.sessionNumber || 1}/${ord.totalSessions || 1}
                 </div>
                 <div style="font-size:11.5px;color:#64748b;margin-top:3px">
@@ -6926,10 +7026,11 @@ function hospitalDayView() {
             const isAdministered = o.status === 'ADMINISTERED';
             const items = o.items || [];
             const vitals = o.vitals || {};
+            const hasMoreSessions = isAdministered && (Number(o.sessionNumber || 1) < Number(o.totalSessions || 1));
 
             return `
             <div class="soap-item" style="border-left:4px solid ${isPending ? '#f59e0b' : isInProgress ? '#3b82f6' : '#15803d'};padding:16px;background:#ffffff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
-              <div class="between" style="align-items:flex-start">
+              <div class="between" style="align-items:flex-start;flex-wrap:wrap;gap:10px">
                 <div>
                   <div class="flex" style="gap:8px;align-items:center;flex-wrap:wrap">
                     <strong style="font-size:15px;color:#18362b">${esc(nameOf(pat))}</strong>
@@ -6940,13 +7041,15 @@ function hospitalDayView() {
                     <span class="badge" style="background:#eaf6ee;color:#1b4c37;font-weight:600">
                       ${esc(o.therapyType || 'Sueroterapia')} · ${esc(o.resource || 'Sillón')} · Sesión ${o.sessionNumber || 1}/${o.totalSessions || 1}
                     </span>
+                    ${getPatientBillingBadge(o.patientId)}
                   </div>
                   <div class="tiny muted" style="margin-top:4px">
                     Indicado por <b>${esc(o.doctorName)}</b> · ${fmtDate(o.createdAt, true)} a las ${fmtTime(o.createdAt)} hs
                     ${o.administeredBy ? ` · Administrado por <b>${esc(o.administeredBy)}</b> (${fmtTime(o.administeredAt)} hs)` : ''}
                   </div>
                 </div>
-                <div class="flex" style="gap:6px">
+                <div class="flex" style="gap:6px;flex-wrap:wrap">
+                  <button class="btn small" data-action="new-payment" data-patient-id="${o.patientId}" title="Registrar cobro o seña para este paciente">${icon('wallet', 12)} Cobrar</button>
                   ${isPending ? `
                     <button class="btn small primary" data-action="hd-checkin" data-id="${o.id}" style="background:#15803d">
                       ${icon('check', 13)} Paciente Llegó
@@ -6957,6 +7060,11 @@ function hospitalDayView() {
                       ${icon('checkcircle', 13)} Finalizar y Descontar Stock
                     </button>
                   ` : `
+                    ${hasMoreSessions ? `
+                      <button class="btn small primary" data-action="hd-next-session" data-id="${o.id}" style="background:#1d4ed8">
+                        ${icon('plus', 13)} Programar Sesión ${(Number(o.sessionNumber || 1) + 1)}/${o.totalSessions}
+                      </button>
+                    ` : ''}
                     <button class="btn small" data-action="hd-view-evolution" data-patient="${o.patientId}">
                       ${icon('file', 13)} Ver Evolución en HCD
                     </button>
@@ -6998,15 +7106,16 @@ function hospitalDayView() {
   </section>`;
 }
 
-function newHospitalDayOrderDialog(patientId = null, defaultResource = null, defaultTherapy = null) {
-  const p = patientBy(patientId) || S.data.patients[0];
+function newHospitalDayOrderDialog(patientId = null, defaultResource = null, defaultTherapy = null, presetOrder = null) {
+  const p = patientBy(presetOrder?.patientId || patientId) || S.data.patients[0];
   const inventory = S.data.inventory || [];
   const doctors = S.data.doctors || [];
 
-  const resources = [
-    'Sillón 1', 'Sillón 2', 'Sillón 3', 'Sillón 4',
-    'Cámara Hiperbárica 1', 'Cabina Fotobiomodulación'
-  ];
+  const resources = getAmbulatoryResources().map(r => r.name);
+  const selResource = presetOrder?.resource || defaultResource || resources[0];
+  const selTherapy = presetOrder?.therapyType || defaultTherapy || 'SUEROTERAPIA';
+  const nextSessionNum = presetOrder ? Math.min(Number(presetOrder.totalSessions || 1), Number(presetOrder.sessionNumber || 1) + 1) : 1;
+  const totSessions = presetOrder ? Number(presetOrder.totalSessions || 5) : 5;
 
   formDialog('new-hospital-day-order', 'Nueva Indicación de Terapias Ambulatorias por Sesión',
     'Permite que el médico indique los insumos y dosis por sesión. Genera orden para enfermería y descuenta stock automáticamente.',
@@ -7020,30 +7129,30 @@ function newHospitalDayOrderDialog(patientId = null, defaultResource = null, def
       <div class="form-field">
         <label>Médico Prescriptor *</label>
         <select name="doctorId" class="input" required>
-          ${doctors.map(d => `<option value="${d.id}">${esc(d.name)} (${esc(d.specialty)})</option>`).join('')}
+          ${doctors.map(d => `<option value="${d.id}" ${d.id === presetOrder?.doctorId ? 'selected' : ''}>${esc(d.name)} (${esc(d.specialty)})</option>`).join('')}
         </select>
       </div>
       <div class="form-field">
         <label>Tipo de Terapia *</label>
         <select name="therapyType" id="hd-therapy-type" class="input" required>
-          <option value="SUEROTERAPIA" ${defaultTherapy === 'SUEROTERAPIA' ? 'selected' : ''}>Sueroterapia / Infusión Endovenosa</option>
-          <option value="CAMARA_HIPERBARICA" ${defaultTherapy === 'CAMARA_HIPERBARICA' ? 'selected' : ''}>Cámara Hiperbárica (CHB)</option>
-          <option value="FOTOBIOMODULACION" ${defaultTherapy === 'FOTOBIOMODULACION' ? 'selected' : ''}>Fotobiomodulación (Luz / Láser)</option>
+          <option value="SUEROTERAPIA" ${selTherapy === 'SUEROTERAPIA' ? 'selected' : ''}>Sueroterapia / Infusión Endovenosa</option>
+          <option value="CAMARA_HIPERBARICA" ${selTherapy === 'CAMARA_HIPERBARICA' ? 'selected' : ''}>Cámara Hiperbárica (CHB)</option>
+          <option value="FOTOBIOMODULACION" ${selTherapy === 'FOTOBIOMODULACION' ? 'selected' : ''}>Fotobiomodulación (Luz / Láser)</option>
         </select>
       </div>
       <div class="form-field">
         <label>Sillón / Box de Tratamiento *</label>
         <select name="resource" id="hd-resource-select" class="input" required>
-          ${resources.map(r => `<option value="${r}" ${r === defaultResource ? 'selected' : ''}>${r}</option>`).join('')}
+          ${resources.map(r => `<option value="${r}" ${r === selResource ? 'selected' : ''}>${r}</option>`).join('')}
         </select>
       </div>
       <div class="form-field">
         <label>Número de Sesión</label>
-        <input type="number" name="sessionNumber" value="1" min="1" max="99" class="input" required>
+        <input type="number" name="sessionNumber" value="${nextSessionNum}" min="1" max="99" class="input" required>
       </div>
       <div class="form-field">
         <label>Total de Sesiones Programadas</label>
-        <input type="number" name="totalSessions" value="5" min="1" max="99" class="input" required>
+        <input type="number" name="totalSessions" value="${totSessions}" min="1" max="99" class="input" required>
       </div>
     </div>
 
@@ -7075,13 +7184,13 @@ function newHospitalDayOrderDialog(patientId = null, defaultResource = null, def
 
     <div class="form-field full">
       <label>Instrucciones y Pautas Clínicas para Enfermería *</label>
-      <textarea name="instructions" id="hd-instructions" class="input" style="height:70px" required placeholder="Ej: Pasar en 45 minutos. Control de TA previa y posterior. En caso de mareo reducir goteo a 30 gotas/min."></textarea>
+      <textarea name="instructions" id="hd-instructions" class="input" style="height:70px" required placeholder="Ej: Pasar en 45 minutos. Control de TA previa y posterior. En caso de mareo reducir goteo a 30 gotas/min.">${esc(presetOrder?.instructions || '')}</textarea>
     </div>
     <div class="form-field full">
       <label>Observaciones o Diagnóstico de Derivación</label>
-      <input type="text" name="notes" class="input" placeholder="Ej: Fatiga crónica, soporte inmunológico post-viral.">
+      <input type="text" name="notes" class="input" value="${esc(presetOrder?.notes || '')}" placeholder="Ej: Fatiga crónica, soporte inmunológico post-viral.">
     </div>`,
-    'Emitir Indicación de Hospital de Día', '', 'wide'
+    'Emitir Indicación de Terapias Ambulatorias', '', 'wide'
   );
 
   setTimeout(() => {
@@ -7172,8 +7281,12 @@ function newHospitalDayOrderDialog(patientId = null, defaultResource = null, def
       }
     });
 
-    // Default row
-    addRow('Vitamina C Inyectable', '10 gramos', 1);
+    // Default or preset rows
+    if (presetOrder?.items?.length) {
+      presetOrder.items.forEach(it => addRow(it.name || '', it.dose || '', it.quantity || 1, it.inventoryId || ''));
+    } else {
+      addRow('Vitamina C Inyectable', '10 gramos', 1);
+    }
   }, 50);
 }
 
@@ -8130,6 +8243,14 @@ document.addEventListener('click', async e => {
       case 'new-hospital-day-order':
         newHospitalDayOrderDialog(el.dataset.patient || S.selectedPatient, el.dataset.resource);
         break;
+      case 'config-ambulatory-resources':
+        configAmbulatoryResourcesDialog();
+        break;
+      case 'hd-next-session': {
+        const ord = (S.data?.medicalOrders || []).find(o => o.id === id);
+        if (ord) newHospitalDayOrderDialog(ord.patientId, ord.resource, ord.therapyType, ord);
+        break;
+      }
       case 'hd-filter':
         S.hospitalDayFilter = el.dataset.val;
         contentOnly();
@@ -8449,6 +8570,7 @@ document.addEventListener('submit', async e => {
       S.view = S.session.user?.role === 'SUPER_ADMIN' ? 'admin' : 'home';
       if (!PREVIEW) history.replaceState({}, '', paths[S.view]);
       render();
+      startRealtimeSync();
       return;
     }
     if (kind === 'global-search') {
@@ -8837,6 +8959,7 @@ document.addEventListener('submit', async e => {
         await refreshPortal();
         toast('¡Bienvenido/a, ' + (res.patient?.firstName || '') + '!');
         render();
+        startRealtimeSync();
         return;
       }
       case 'portal-register': {
@@ -8847,6 +8970,7 @@ document.addEventListener('submit', async e => {
         await refreshPortal();
         toast('Registro completado. ¡Bienvenido/a a tu portal de salud!');
         render();
+        startRealtimeSync();
         return;
       }
       case 'portal-booking': {
@@ -8865,6 +8989,17 @@ document.addEventListener('submit', async e => {
         await refreshPortal();
         S.portal.activeTab = 'estudios';
         render();
+        return;
+      }
+      case 'config-ambulatory-resources': {
+        let resources = [];
+        try { resources = JSON.parse(b.resourcesJson || '[]'); } catch {}
+        if (!resources.length) throw Error('Agrega al menos un sillón o box.');
+        await api('/api/settings', 'PATCH', { ambulatoryResources: resources });
+        closeModal();
+        await refresh();
+        contentOnly();
+        toast('Sillones y boxes de Terapias Ambulatorias actualizados.');
         return;
       }
       case 'new-hospital-day-order': {
@@ -9174,6 +9309,151 @@ function renderSetPasswordView(accessToken, tokenType, refreshToken = null) {
   });
 }
 
+let _rtSocket = null;
+let _rtTimer = null;
+let _rtHeartbeat = null;
+let _rtBusy = false;
+let _rtPendingRender = false;
+let _rtDebounce = null;
+
+function canSafeAutoRender() {
+  const modal = $('#modal');
+  if (modal && modal.open) return false;
+  const active = document.activeElement;
+  if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return false;
+  if (active && active.isContentEditable) return false;
+  return true;
+}
+
+async function performRealtimeSync(reason = 'poll', eventTable = '') {
+  if (_rtBusy || document.hidden) return;
+  if (S.view === 'portal') {
+    if (!S.portal?.token || !S.portal?.data) return;
+    _rtBusy = true;
+    try {
+      const prevAppts = S.portal.data.appointments?.length || 0;
+      const prevRecs = S.portal.data.records?.length || 0;
+      const prevRx = S.portal.data.prescriptions?.length || 0;
+      await refreshPortal();
+      const newAppts = S.portal.data?.appointments?.length || 0;
+      const newRecs = S.portal.data?.records?.length || 0;
+      const newRx = S.portal.data?.prescriptions?.length || 0;
+      if (newRx > prevRx) toast('Nueva receta electrónica disponible en tu Portal.');
+      else if (newAppts !== prevAppts || newRecs !== prevRecs) toast('Portal actualizado en tiempo real.');
+      if (canSafeAutoRender()) render();
+    } catch {} finally { _rtBusy = false; }
+    return;
+  }
+
+  if (!S.session?.user || !S.data) return;
+  _rtBusy = true;
+  try {
+    const prevAppts = S.data.appointments?.length || 0;
+    const prevRecs = S.data.records?.length || 0;
+    const prevPays = S.data.payments?.length || 0;
+    const prevOrders = S.data.medicalOrders?.length || 0;
+    const prevLeads = S.data.leads?.length || 0;
+    await refresh();
+    const curAppts = S.data?.appointments?.length || 0;
+    const curRecs = S.data?.records?.length || 0;
+    const curPays = S.data?.payments?.length || 0;
+    const curOrders = S.data?.medicalOrders?.length || 0;
+    const curLeads = S.data?.leads?.length || 0;
+
+    if (curAppts > prevAppts) toast('Nuevo turno registrado en agenda en tiempo real.');
+    else if (curRecs > prevRecs) toast('Nuevo estudio o evolución clínica recibida en tiempo real.');
+    else if (curPays > prevPays) toast('Nuevo cobro o comprobante de pago recibido en tiempo real.');
+    else if (curOrders > prevOrders) toast('Nueva indicación de Terapias Ambulatorias en tiempo real.');
+    else if (curLeads > prevLeads) toast('Nueva consulta o contacto recibido en tiempo real.');
+    else if (reason === 'ws' && eventTable) {
+      // Silencioso para updates/cambios de estado sin ruido excesivo
+    }
+
+    if (canSafeAutoRender()) {
+      contentOnly();
+    } else {
+      _rtPendingRender = true;
+    }
+  } catch {} finally {
+    _rtBusy = false;
+  }
+}
+
+function scheduleRealtimeRefresh(tableName = '') {
+  clearTimeout(_rtDebounce);
+  _rtDebounce = setTimeout(() => performRealtimeSync('ws', tableName), 350);
+}
+
+function startRealtimeSync() {
+  if (PREVIEW) return;
+  if (!_rtTimer) {
+    _rtTimer = setInterval(() => performRealtimeSync('poll'), 6000);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) performRealtimeSync('focus');
+    });
+    document.addEventListener('close', () => {
+      if (_rtPendingRender && canSafeAutoRender()) {
+        _rtPendingRender = false;
+        contentOnly();
+      }
+    }, true);
+  }
+
+  if (typeof SUPABASE_CONFIG === 'undefined' || !SUPABASE_CONFIG.url || !SUPABASE_CONFIG.anonKey) return;
+  if (_rtSocket && (_rtSocket.readyState === WebSocket.OPEN || _rtSocket.readyState === WebSocket.CONNECTING)) return;
+
+  try {
+    const wsBase = SUPABASE_CONFIG.url.replace(/^http/, 'ws');
+    const wsUrl = `${wsBase}/realtime/v1/websocket?apikey=${encodeURIComponent(SUPABASE_CONFIG.anonKey)}&vsn=1.0.0`;
+    const ws = new WebSocket(wsUrl);
+    _rtSocket = ws;
+    let refCounter = 1;
+
+    ws.onopen = () => {
+      const watchTables = ['appointments', 'records', 'medical_orders', 'payments', 'inventory', 'leads', 'prescriptions', 'invoices', 'quotes', 'patients', 'consents', 'settings'];
+      ws.send(JSON.stringify({
+        topic: 'realtime:public',
+        event: 'phx_join',
+        payload: {
+          config: {
+            broadcast: { self: false },
+            presence: { key: '' },
+            postgres_changes: watchTables.map(t => ({ event: '*', schema: 'public', table: t }))
+          },
+          access_token: S.session?.token || localStorage.getItem('supabase_token') || SUPABASE_CONFIG.anonKey
+        },
+        ref: String(refCounter++)
+      }));
+      clearInterval(_rtHeartbeat);
+      _rtHeartbeat = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: String(refCounter++) }));
+        }
+      }, 25000);
+    };
+
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.event === 'postgres_changes') {
+          const tbl = msg.payload?.data?.table || msg.payload?.table || '';
+          scheduleRealtimeRefresh(tbl);
+        }
+      } catch {}
+    };
+
+    ws.onclose = () => {
+      clearInterval(_rtHeartbeat);
+      _rtSocket = null;
+      setTimeout(() => {
+        if (S.session?.user || S.portal?.token) startRealtimeSync();
+      }, 5000);
+    };
+  } catch (e) {
+    console.warn('[realtime ws init warning]', e);
+  }
+}
+
 async function boot() {
   const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
   const hashParams = new URLSearchParams(hash);
@@ -9205,6 +9485,7 @@ async function boot() {
       try { await refreshPortal(); } catch {}
     }
     render();
+    startRealtimeSync();
     return;
   }
 
@@ -9222,6 +9503,7 @@ async function boot() {
     const isAdmin = S.session.user.role === 'SUPER_ADMIN';
     S.view = isAdmin ? 'admin' : (Object.keys(paths).find(k => paths[k] === location.pathname) || 'home');
     render();
+    startRealtimeSync();
   } catch (err) {
     console.error('[boot error]', err);
     localStorage.removeItem('clinic_session');
