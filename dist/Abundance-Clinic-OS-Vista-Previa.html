@@ -1968,6 +1968,18 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     return { id: integId, status: 'NOT_CONNECTED' };
   }
 
+  const triggerGhlOutbound = (action, payload) => {
+    fetch(`${SUPABASE_CONFIG.url}/functions/v1/ghl-outbound`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_CONFIG.anonKey,
+        'Authorization': `Bearer ${SUPABASE_CONFIG.anonKey}`
+      },
+      body: JSON.stringify({ action, ...payload })
+    }).catch(() => {});
+  };
+
   const integTestMatch = path.match(/^\/api\/admin\/integrations\/([^/]+)\/test$/);
   if (integTestMatch && method === 'POST') {
     const integId = integTestMatch[1];
@@ -1979,7 +1991,23 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     }
     const cfg = typeof item.config === 'string' ? JSON.parse(item.config || '{}') : (item.config || {});
     if (integId === 'arca' && (!cfg.cuit || !cfg.puntoVenta)) throw Error('Faltan CUIT emisor y Punto de Venta de ARCA.');
-    if (integId === 'highlevel' && (!cfg.locationId || !cfg.apiKey)) throw Error('Faltan Location ID y API Key de GoHighLevel.');
+    if (integId === 'highlevel') {
+      if (!cfg.locationId || !cfg.apiKey) throw Error('Faltan Location ID y API Key de GoHighLevel.');
+      const tRes = await fetch(`${SUPABASE_CONFIG.url}/functions/v1/ghl-outbound`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_CONFIG.anonKey,
+          'Authorization': `Bearer ${SUPABASE_CONFIG.anonKey}`
+        },
+        body: JSON.stringify({ action: 'test', workspaceId: currentWorkspaceId })
+      });
+      const tData = await tRes.json().catch(() => ({}));
+      if (!tRes.ok || !tData.ok) {
+        throw Error(tData.error || 'Error validando credenciales contra GoHighLevel API.');
+      }
+      return tData;
+    }
     if (integId === 'whatsapp' && (!cfg.phoneNumberId || !cfg.token)) throw Error('Faltan Phone Number ID y Token de WhatsApp Business API.');
     if (integId === 'mercadopago' && !cfg.accessToken) throw Error('Falta Access Token de Mercado Pago.');
     if (integId === 'google' && (!cfg.clientId || !cfg.calendarId)) throw Error('Faltan Client ID y Calendar ID de Google Calendar.');
@@ -2334,6 +2362,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       const err = await res.json().catch(() => ({}));
       throw Error(err.message || 'Error al guardar el turno.');
     }
+    triggerGhlOutbound('appointment-created', { workspaceId: currentWorkspaceId, appointment: newAppt });
     return newAppt;
   }
 
@@ -2462,6 +2491,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       const err = await res.json().catch(() => ({}));
       throw Error(err.message || 'Error al guardar el paciente.');
     }
+    triggerGhlOutbound('upsert-contact', { workspaceId: currentWorkspaceId, contact: newPat });
     return { ...newPat, firstName: newPat.first_name, lastName: newPat.last_name };
   }
 
@@ -2816,6 +2846,11 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       p_duration: Number(body.duration) || 30,
       p_type: body.type || 'CONSULTATION',
       p_notes: body.notes || 'Turno solicitado online por el paciente'
+    });
+    const portalWsId = S.portal?.patient?.workspace_id || S.portal?.workspace?.id || currentWorkspaceId;
+    triggerGhlOutbound('appointment-created', {
+      workspaceId: portalWsId,
+      appointment: res || { patient_id: patId, doctor_id: body.doctorId, start_at: startAt, type: body.type || 'CONSULTATION', notes: body.notes || '' }
     });
     return { ok: true, appointment: res };
   }
@@ -9378,9 +9413,19 @@ function configIntegrationDialog(id) {
 
   let fields = '';
   if (id === 'highlevel') {
-    fields = field('Location ID (Subcuenta GHL) *', 'locationId', 'text', cfg.locationId || '', 'required placeholder="Ej. lk872HgasdA98"') +
+    const wsId = encodeURIComponent(S.supportMode?.id || S.session?.user?.workspaceId || 'clinic-central');
+    const inboundWebhookUrl = `${SUPABASE_CONFIG.url}/functions/v1/ghl-webhook?ws=${wsId}`;
+    fields = `<div style="grid-column:span 2;background:var(--surface-alt);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:4px">
+      <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px">Webhook Entrante para GoHighLevel (Inbound Link)</div>
+      <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;line-height:1.4">Copiá este enlace y pegalo en una acción <b>Webhook (POST)</b> dentro de tus Workflows de GHL para recibir leads, formularios y consultas de WhatsApp en tiempo real.</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="field-input" type="text" readonly value="${esc(inboundWebhookUrl)}" style="font-family:monospace;font-size:11.5px;background:var(--bg);flex:1" onclick="this.select()" />
+        <button type="button" class="btn btn-sm btn-secondary" onclick="navigator.clipboard?.writeText('${esc(inboundWebhookUrl)}'); toast('Link de Webhook copiado','success')">Copiar</button>
+      </div>
+    </div>` +
+      field('Location ID (Subcuenta GHL) *', 'locationId', 'text', cfg.locationId || '', 'required placeholder="Ej. lk872HgasdA98"') +
       field('API Key / Private Token *', 'apiKey', 'password', cfg.apiKey || '', 'required placeholder="eyJhbGciOi..."') +
-      field('Webhook URL para sincronización', 'webhookUrl', 'url', cfg.webhookUrl || '', 'placeholder="https://services.leadconnectorhq.com/..."', true);
+      field('Webhook URL Saliente (Workflow GHL)', 'webhookUrl', 'url', cfg.webhookUrl || '', 'placeholder="https://services.leadconnectorhq.com/hooks/..."', true);
   } else if (id === 'whatsapp') {
     fields = field('Phone Number ID *', 'phoneNumberId', 'text', cfg.phoneNumberId || '', 'required placeholder="109283748291"') +
       field('Meta App ID *', 'appId', 'text', cfg.appId || '', 'required placeholder="89283749281"') +
