@@ -2415,6 +2415,8 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       const err = await res.json().catch(() => ({}));
       throw Error(err.message || 'Error al actualizar el turno.');
     }
+    const updatedRow = (await res.json().catch(() => []))?.[0] || { id: apptId, ...patchData };
+    triggerGhlOutbound('appointment-updated', { workspaceId: currentWorkspaceId, appointmentId: apptId, appointment: updatedRow });
     return { id: apptId, ...patchData };
   }
 
@@ -2888,6 +2890,8 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     const pTok = headers['Authorization']?.slice(7) || S.portal?.token || localStorage.getItem('portal_token');
     const patId = pTok?.replace('ptok_', '') || S.portal?.patient?.id;
     await rpc('portal_cancel_appointment', { p_patient_id: patId, p_appointment_id: id });
+    const portalWsId = S.portal?.patient?.workspace_id || S.portal?.workspace?.id || currentWorkspaceId;
+    triggerGhlOutbound('appointment-updated', { workspaceId: portalWsId, appointmentId: id });
     return { ok: true };
   }
 
@@ -3582,6 +3586,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       body: JSON.stringify(newPat)
     });
     if (!patRes.ok) throw Error('No se pudo convertir el contacto a paciente.');
+    triggerGhlOutbound('upsert-contact', { workspaceId: currentWorkspaceId, contact: newPat });
     await fetch(`${SUPABASE_CONFIG.url}/rest/v1/leads?id=eq.${leadId}&workspace_id=eq.${currentWorkspaceId}`, {
       method: 'PATCH',
       headers: authHeaders,
@@ -9441,14 +9446,15 @@ function configIntegrationDialog(id) {
     const inboundWebhookUrl = `${SUPABASE_CONFIG.url}/functions/v1/ghl-webhook?ws=${wsId}`;
     fields = `<div style="grid-column:span 2;background:var(--surface-alt);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:4px">
       <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px">Webhook Entrante para GoHighLevel (Inbound Link)</div>
-      <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;line-height:1.4">Copiá este enlace y pegalo en una acción <b>Webhook (POST)</b> dentro de tus Workflows de GHL para recibir leads, formularios y consultas de WhatsApp en tiempo real.</div>
+      <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;line-height:1.4">Copiá este enlace y pegalo en una acción <b>Webhook (POST)</b> dentro de tus Workflows de GHL para recibir <b>leads, mensajes de WhatsApp, turnos agendados y cancelaciones</b> en tiempo real.</div>
       <div style="display:flex;gap:8px;align-items:center">
         <input class="field-input" type="text" readonly value="${esc(inboundWebhookUrl)}" style="font-family:monospace;font-size:11.5px;background:var(--bg);flex:1" onclick="this.select()" />
         <button type="button" class="btn btn-sm btn-secondary" onclick="navigator.clipboard?.writeText('${esc(inboundWebhookUrl)}'); toast('Link de Webhook copiado','success')">Copiar</button>
       </div>
     </div>` +
       field('Location ID (Subcuenta GHL) *', 'locationId', 'text', cfg.locationId || '', 'required placeholder="Ej. lk872HgasdA98"') +
-      field('API Key / Private Token *', 'apiKey', 'password', cfg.apiKey || '', 'required placeholder="eyJhbGciOi..."') +
+      field('API Key / Private Token *', 'apiKey', 'password', cfg.apiKey || '', 'required placeholder="pit-..."') +
+      field('Calendar ID (Opcional · Turnos GHL)', 'calendarId', 'text', cfg.calendarId || '', 'placeholder="Si se deja vacío usa el calendario principal"') +
       field('Webhook URL Saliente (Workflow GHL)', 'webhookUrl', 'url', cfg.webhookUrl || '', 'placeholder="https://services.leadconnectorhq.com/hooks/..."', true);
   } else if (id === 'whatsapp') {
     fields = field('Phone Number ID *', 'phoneNumberId', 'text', cfg.phoneNumberId || '', 'required placeholder="109283748291"') +
