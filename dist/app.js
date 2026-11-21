@@ -4192,17 +4192,17 @@ function renderComparativeEvolutionPanel(p, allPatientRecords) {
 
   return `
   <section class="panel" style="margin-bottom:16px;border:1px solid #bfdbfe;background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%)">
-    <div class="panel-header" style="border-bottom:1px solid #dbeafe">
-      <div>
-        <div class="flex" style="gap:8px;align-items:center">
+    <div class="panel-header" style="border-bottom:1px solid #dbeafe;flex-wrap:wrap;gap:12px;align-items:flex-start">
+      <div style="min-width:0;flex:1 1 320px">
+        <div class="flex" style="gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
           <span class="badge blue" style="background:#1d4ed8;color:#fff">${icon('activity', 12)} Experiencia de Paciente & Evolución</span>
-          <h2 style="font-size:15.5px;color:#0f172a">Comparativa Clínica: Documentos del Paciente vs. Evolución Médica</h2>
+          <h2 style="font-size:15.5px;color:#0f172a;margin:0">Comparativa Clínica: Paciente vs. Evolución Médica</h2>
         </div>
-        <p class="panel-sub">Sincronización directa entre los estudios subidos por ${esc(nameOf(p))} en su Portal y los nuevos controles, laboratorios y evoluciones del equipo médico.</p>
+        <p class="panel-sub" style="margin:0">Sincronización directa entre los estudios subidos por ${esc(nameOf(p))} en su Portal y los nuevos controles, laboratorios y evoluciones del equipo médico.</p>
       </div>
-      <div class="flex" style="gap:8px">
-        <button class="btn small" data-action="new-attachment">${icon('upload', 12)} Cargar Resultado Médico</button>
-        <button class="btn small primary" data-action="new-record">${icon('plus', 12)} Registrar Evolución Comparativa</button>
+      <div class="flex" style="gap:8px;flex-wrap:wrap">
+        <button class="btn small" data-action="new-attachment">${icon('upload', 12)} Cargar Resultado</button>
+        <button class="btn small primary" data-action="new-record">${icon('plus', 12)} Nueva Evolución</button>
       </div>
     </div>
 
@@ -4361,6 +4361,13 @@ function recordsView() {
     return true;
   });
 
+  const patMode = S.recordPatientsMode || 'normal';
+  const patLayoutClass = patMode === 'collapsed' ? 'patients-collapsed' : patMode === 'wide' ? 'patients-wide' : '';
+  const patQuery = (S.recordPatientSearch || '').toLowerCase().trim();
+  const visiblePatients = (S.data.patients || []).filter(pat =>
+    !patQuery || [nameOf(pat), pat.dni, pat.coverage, pat.phone].some(x => String(x || '').toLowerCase().includes(patQuery))
+  );
+
   return heading('Historia Clínica Integral', 'Evoluciones médicas, estudios del portal del paciente, comparativa de evolución, órdenes de estudio y consentimientos inmutables.',
     `<div class="flex" style="gap:8px;flex-wrap:wrap">
       ${p ? `<button class="btn small" data-action="export-complete-hce" data-id="${p.id}" title="Descargar copia completa de la Historia Clínica conforme Ley 26.529">${icon('download', 13)} Exportar HCE Completa (Ley 26.529)</button>` : ''}
@@ -4370,13 +4377,41 @@ function recordsView() {
       <button class="btn small primary" data-action="new-record">${icon('plus', 13)} Nueva Evolución</button>
     </div>`
   ) +
-  `<div class="record-layout">
-    <section class="panel record-patients">
-      <div class="panel-header"><h2>Pacientes</h2><span class="tiny muted">${S.data.patients.length}</span></div>
-      ${S.data.patients.map((pat, i) => `<div class="patient-choice ${S.selectedPatient === pat.id ? 'active' : ''}" data-action="select-record-patient" data-id="${pat.id}" tabindex="0" role="button">
-        ${avatar(nameOf(pat), i)}
-        <div><div class="patient-name">${esc(nameOf(pat))}</div><div class="patient-sub">${esc(pat.dni ? `DNI ${pat.dni}` : 'Sin DNI')} · ${esc(pat.coverage || 'Particular')}</div></div>
-      </div>`).join('')}
+  `<div class="record-layout ${patLayoutClass}">
+    <section class="panel record-patients" style="${patMode === 'collapsed' ? 'padding:8px 6px;text-align:center' : ''}">
+      ${patMode === 'collapsed' ? `
+        <button type="button" class="icon-btn" data-action="toggle-record-patients-collapse" title="Desplegar lista de pacientes" style="margin:0 auto 8px">
+          ${icon('chevron', 16)}
+        </button>
+        <div class="tiny muted" style="writing-mode:vertical-rl;transform:rotate(180deg);margin:8px auto;font-weight:700;letter-spacing:1px">PACIENTES (${S.data.patients.length})</div>
+      ` : `
+        <div class="panel-header" style="padding:12px 14px;gap:6px">
+          <div class="flex" style="gap:6px;align-items:center">
+            <h2 style="font-size:14px">Pacientes</h2>
+            <span class="badge gray" style="font-size:10px">${visiblePatients.length}/${S.data.patients.length}</span>
+          </div>
+          <div class="flex" style="gap:4px">
+            <button type="button" class="icon-btn" data-action="toggle-record-patients-width" title="${patMode === 'wide' ? 'Ancho estándar' : 'Ampliar ancho de lista'}" style="width:28px;height:28px;font-size:11px;font-weight:700">
+              ${patMode === 'wide' ? '⇄' : '↔'}
+            </button>
+            <button type="button" class="icon-btn" data-action="toggle-record-patients-collapse" title="Contraer lista de pacientes" style="width:28px;height:28px;font-size:12px;font-weight:700">
+              «
+            </button>
+          </div>
+        </div>
+        <div style="padding:0 12px 10px">
+          <div class="omni-search-box" style="padding:5px 10px">
+            <span class="omni-search-icon">${icon('search', 13)}</span>
+            <input id="record-patient-search" type="search" class="omni-search-input" data-input="record-patient-search" placeholder="Buscar paciente o DNI..." value="${esc(S.recordPatientSearch || '')}" style="font-size:12px">
+          </div>
+        </div>
+        <div style="max-height:540px;overflow-y:auto">
+          ${visiblePatients.map((pat, i) => `<div class="patient-choice ${S.selectedPatient === pat.id ? 'active' : ''}" data-action="select-record-patient" data-id="${pat.id}" tabindex="0" role="button">
+            ${avatar(nameOf(pat), i)}
+            <div style="min-width:0"><div class="patient-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(nameOf(pat))}</div><div class="patient-sub">${esc(pat.dni ? `DNI ${pat.dni}` : 'Sin DNI')} · ${esc(pat.coverage || 'Particular')}</div></div>
+          </div>`).join('') || `<div class="tiny muted" style="padding:16px;text-align:center">Sin coincidencias</div>`}
+        </div>
+      `}
     </section>
 
     <div>
@@ -8154,6 +8189,14 @@ document.addEventListener('click', async e => {
         break;
       }
       case 'select-record-patient': S.selectedPatient = id; logHceReadAccess(id); contentOnly(); break;
+      case 'toggle-record-patients-collapse':
+        S.recordPatientsMode = S.recordPatientsMode === 'collapsed' ? 'normal' : 'collapsed';
+        contentOnly();
+        break;
+      case 'toggle-record-patients-width':
+        S.recordPatientsMode = S.recordPatientsMode === 'wide' ? 'normal' : 'wide';
+        contentOnly();
+        break;
       case 'open-patient-records': S.selectedPatient = id; logHceReadAccess(id); closeModal(); await navigate('records'); break;
       case 'export-complete-hce': printCompleteHceDocument(id || S.selectedPatient); break;
       case 'new-study-order': studyOrderDialog(el.dataset.patientId || S.selectedPatient); break;
@@ -9059,6 +9102,16 @@ document.addEventListener('submit', async e => {
 });
 
 document.addEventListener('input', e => {
+  if (e.target.dataset.input === 'record-patient-search') {
+    const value = e.target.value, start = e.target.selectionStart;
+    S.recordPatientSearch = value;
+    contentOnly();
+    const input = $('#record-patient-search');
+    if (input) {
+      input.focus();
+      input.setSelectionRange(start, start);
+    }
+  }
   if (e.target.dataset.input === 'patient-search') {
     const value = e.target.value, start = e.target.selectionStart;
     S.patientSearch = value;

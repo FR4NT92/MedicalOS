@@ -102,13 +102,18 @@
 .agenda-pill .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
 
 /* --- HISTORIAL MÉDICO INTEGRAL --- */
-.omni-top-tabs{display:flex;gap:4px;border-bottom:2px solid #e1e9dc;margin-bottom:16px;overflow-x:auto;padding-bottom:1px}
-.omni-tab-btn{padding:9px 16px;font-size:12.5px;font-weight:600;color:#557060;background:none;border:none;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap;transition:all .15s ease}
-.omni-tab-btn:hover{color:#1b4c37;background:#f4f8f3;border-radius:6px 6px 0 0}
-.omni-tab-btn.active{color:#e67e22;border-bottom-color:#e67e22}
+.record-layout{align-items:start}
+.record-layout > div{min-width:0}
+.record-layout.patients-collapsed{grid-template-columns:54px minmax(0,1fr)}
+.record-layout.patients-wide{grid-template-columns:340px minmax(0,1fr)}
+.omni-top-tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:2px solid #e1e9dc;margin-bottom:14px;padding-bottom:6px;overflow:visible}
+.omni-tab-btn{padding:7px 12px;font-size:12px;font-weight:600;color:#557060;background:#f8fbf9;border:1px solid #e2e8e2;border-radius:8px;cursor:pointer;white-space:nowrap;transition:all .15s ease}
+.omni-tab-btn:hover{color:#1b4c37;background:#edf5ee;border-color:#c6dcc9}
+.omni-tab-btn.active{color:#ffffff;background:#1b4c37;border-color:#1b4c37}
 
-.omni-container{display:grid;grid-template-columns:250px 1fr;gap:20px;align-items:start}
-@media(max-width:900px){.omni-container{grid-template-columns:1fr}}
+.omni-container{display:grid;grid-template-columns:225px minmax(0,1fr);gap:18px;align-items:start}
+.omni-feed{min-width:0}
+@media(max-width:900px){.omni-container{grid-template-columns:1fr}.record-layout.patients-collapsed,.record-layout.patients-wide{grid-template-columns:1fr}}
 
 .omni-sidebar{background:#fbfdfa;border:1px solid #e4ece0;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:14px}
 .omni-sidebar-title{font-size:11px;font-weight:750;text-transform:uppercase;color:#496b58;letter-spacing:0.5px;margin-bottom:6px}
