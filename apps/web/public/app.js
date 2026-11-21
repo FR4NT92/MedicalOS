@@ -1096,19 +1096,47 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     return updated;
   }
 
+  if (path === '/api/portal/clinics' && method === 'GET') {
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?select=id,name,status&status=eq.ACTIVE&order=name.asc`, { headers: authHeaders }).catch(() => null);
+    const list = (await res?.json?.().catch(() => [])) || [];
+    return { clinics: Array.isArray(list) ? list : [] };
+  }
+
   if (path.startsWith('/api/portal/auth/request-otp') && method === 'POST') {
     const dni = (body?.dni || '').trim().replace(/\D/g, '');
     const phoneIn = (body?.phone || '').trim().replace(/\D/g, '');
-    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?select=*&dni=eq.${encodeURIComponent(dni)}&limit=1`, { headers: authHeaders }).catch(() => null);
+    const targetWs = body?.workspaceId || S.portal?.clinicId || '';
+    const wsFilter = targetWs ? `&workspace_id=eq.${encodeURIComponent(targetWs)}` : '';
+    const res = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?select=*&dni=eq.${encodeURIComponent(dni)}${wsFilter}`, { headers: authHeaders }).catch(() => null);
     const pats = (await res?.json?.()) || [];
     if (!pats.length) {
       return { ok: true, exists: false, message: 'No encontramos una ficha registrada con este DNI.' };
     }
-    const p = pats[0];
-    const patPhone = String(p.phone || '').replace(/\D/g, '');
-    if (patPhone.length >= 6 && phoneIn.length >= 6 && !patPhone.endsWith(phoneIn.slice(-6)) && !phoneIn.endsWith(patPhone.slice(-6))) {
+    const matchingPats = pats.filter(pat => {
+      const patPhone = String(pat.phone || '').replace(/\D/g, '');
+      if (patPhone.length < 6 || phoneIn.length < 6) return true;
+      return patPhone.endsWith(phoneIn.slice(-6)) || phoneIn.endsWith(patPhone.slice(-6));
+    });
+    if (!matchingPats.length) {
       throw Error('El teléfono ingresado no coincide con el registrado en tu ficha médica.');
     }
+    if (matchingPats.length > 1 && !targetWs) {
+      const wsIds = Array.from(new Set(matchingPats.map(x => x.workspace_id).filter(Boolean)));
+      const wsRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?select=id,name&id=in.(${wsIds.map(encodeURIComponent).join(',')})`, { headers: authHeaders }).catch(() => null);
+      const wsList = (await wsRes?.json?.().catch(() => [])) || [];
+      return {
+        ok: true,
+        exists: true,
+        multiClinic: true,
+        clinics: matchingPats.map(mp => ({
+          workspaceId: mp.workspace_id,
+          clinicName: wsList.find(w => w.id === mp.workspace_id)?.name || mp.workspace_id,
+          patientId: mp.id
+        }))
+      };
+    }
+    const p = matchingPats[0];
+    const patPhone = String(p.phone || '').replace(/\D/g, '');
     const otpCode = String(Math.floor(100000 + Math.random() * 900000));
     sessionStorage.setItem('portal_otp_' + dni, JSON.stringify({ code: otpCode, expiresAt: Date.now() + 10 * 60000, patient: p }));
     return {
@@ -1151,9 +1179,10 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
 
   if (path === '/api/portal/auth/register' && method === 'POST') {
     const newId = 'pat-' + makeId().slice(0, 8);
+    const wsId = body.workspaceId || S.portal?.clinicId || 'clinic-central';
     const newPat = {
       id: newId,
-      workspace_id: 'clinic-central',
+      workspace_id: wsId,
       first_name: body.firstName,
       last_name: body.lastName || '',
       dni: String(body.dni || '').trim().replace(/\D/g, ''),
@@ -1163,7 +1192,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       affiliate_number: body.affiliateNumber || null,
       birth_date: body.birthDate || null,
       status: 'ACTIVE',
-      notes: 'Registrado online vía Portal Pacientes',
+      notes: 'Registrado online vía Portal Pacientes (Aceptó Ley 25.326 / 26.529)',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -1191,11 +1220,12 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     if (!p?.id) throw Error('Sesión de paciente expirada. Ingresa nuevamente.');
     const wsId = p.workspace_id || p.workspaceId || 'clinic-central';
 
-    const [wsRes, docRes, agRes, apptRes, recRes, presRes, invRes, cstRes] = await Promise.all([
+    const [wsRes, docRes, agRes, apptRes, busyRes, recRes, presRes, invRes, cstRes] = await Promise.all([
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?id=eq.${wsId}&limit=1`, { headers: authHeaders }).catch(() => null),
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/doctors?workspace_id=eq.${wsId}`, { headers: authHeaders }).catch(() => null),
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/agendas?workspace_id=eq.${wsId}`, { headers: authHeaders }).catch(() => null),
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?patient_id=eq.${patId}&order=start_at.desc`, { headers: authHeaders }).catch(() => null),
+      fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?select=doctor_id,start_at,duration&workspace_id=eq.${wsId}&status=neq.CANCELLED`, { headers: authHeaders }).catch(() => null),
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/records?patient_id=eq.${patId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/prescriptions?patient_id=eq.${patId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/invoices?patient_id=eq.${patId}&order=created_at.desc`, { headers: authHeaders }).catch(() => null),
@@ -1206,6 +1236,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     const doctors = (await docRes?.json?.().catch(() => [])) || [];
     const agendas = (await agRes?.json?.().catch(() => [])) || [];
     const rawAppts = (await apptRes?.json?.().catch(() => [])) || [];
+    const rawBusy = (await busyRes?.json?.().catch(() => [])) || [];
     const rawRecs = (await recRes?.json?.().catch(() => [])) || [];
     const rawPresc = (await presRes?.json?.().catch(() => [])) || [];
     const rawInvs = (await invRes?.json?.().catch(() => [])) || [];
@@ -1287,10 +1318,22 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
         address: 'Sede Clínica · Consultorios Médicos',
         phone: ''
       },
-      doctors,
+      doctors: doctors.map(d => ({ ...d, licenseNumber: d.license_number || '', signatureData: d.signature_data || '', address: d.address || '' })),
       agendas,
       appointments,
-      prescriptions,
+      busySlots: Array.isArray(rawBusy) ? rawBusy.map(b => ({ doctorId: b.doctor_id, startAt: b.start_at, duration: b.duration || 30 })) : [],
+      prescriptions: rawPresc.map(pr => ({
+        id: pr.id,
+        doctorId: pr.doctor_id,
+        doctorName: pr.doctor_name,
+        doctorLicense: pr.doctor_license,
+        cuir: pr.cuir,
+        diagnosis: pr.diagnosis,
+        medications: typeof pr.medications === 'string' ? JSON.parse(pr.medications || '[]') : (pr.medications || []),
+        content: pr.content,
+        status: pr.status,
+        createdAt: pr.created_at
+      })),
       invoices,
       records,
       consents
@@ -1301,14 +1344,30 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     const pTok = headers['Authorization']?.slice(7) || S.portal?.token || localStorage.getItem('portal_token');
     const patId = pTok?.replace('ptok_', '') || S.portal?.patient?.id;
     const wsId = S.portal?.patient?.workspaceId || 'clinic-central';
+    const startAt = `${body.date}T${body.time}:00-03:00`;
+    const reqStartMs = Date.parse(startAt);
+    const reqEndMs = reqStartMs + (Number(body.duration) || 30) * 60000;
+
+    // Verificar superposición de agenda del profesional
+    const checkRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/appointments?select=id,start_at,duration&workspace_id=eq.${wsId}&doctor_id=eq.${encodeURIComponent(body.doctorId)}&status=neq.CANCELLED`, { headers: authHeaders }).catch(() => null);
+    const existingAppts = (await checkRes?.json?.().catch(() => [])) || [];
+    const clash = existingAppts.find(ex => {
+      const s = Date.parse(ex.start_at);
+      const e = s + (Number(ex.duration) || 30) * 60000;
+      return reqStartMs < e && reqEndMs > s;
+    });
+    if (clash) {
+      throw Error('Ese horario ya se encuentra reservado para el profesional seleccionado. Por favor elige otro horario.');
+    }
+
     const newAppt = {
       id: 'app-' + makeId().slice(0, 8),
       workspace_id: wsId,
       patient_id: patId,
       doctor_id: body.doctorId,
       agenda_id: body.agendaId || null,
-      start_at: `${body.date}T${body.time}:00-03:00`,
-      end_at: new Date(Date.parse(`${body.date}T${body.time}:00-03:00`) + (Number(body.duration) || 30) * 60000).toISOString(),
+      start_at: startAt,
+      end_at: new Date(reqEndMs).toISOString(),
       duration: Number(body.duration) || 30,
       type: body.type || 'CONSULTATION',
       status: 'CONFIRMED',
@@ -1968,6 +2027,23 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     };
   }
 
+  if (path === '/api/audit/hce-read' && method === 'POST') {
+    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/audit_logs`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        id: 'audit-' + makeId().slice(0, 8),
+        workspace_id: currentWorkspaceId,
+        actor: S.session?.user?.name || 'Personal Clínico',
+        action: 'HCE_ACCESS_READ',
+        entity: 'patient_record',
+        entity_id: body.patientId || '',
+        details: body.details || `Acceso de lectura a Historia Clínica Electrónica (Ley 26.529).`
+      })
+    }).catch(() => {});
+    return { ok: true };
+  }
+
   if (path === '/api/copilot' && method === 'POST') {
     const integRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/integrations?id=eq.ai&limit=1`, { headers: authHeaders });
     const aiInteg = (await integRes.json().catch(() => []))?.[0];
@@ -1980,7 +2056,39 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
       else answer += `Hay ${todayAppts.length} turnos en agenda y ${(S.data?.patients || []).length} pacientes registrados.`;
       return { answer, source: 'LOCAL_RULES', externalModel: false };
     }
-    return { answer: 'Asistente IA conectado y listo para operar.', source: 'AI_CONNECTED', externalModel: true };
+    const cfg = typeof aiInteg.config === 'string' ? JSON.parse(aiInteg.config || '{}') : (aiInteg.config || {});
+    const ctxSummary = `Clínica: ${S.data?.workspace?.name || 'Clínica'}. Pacientes: ${(S.data?.patients || []).length}. Turnos activos: ${(S.data?.appointments || []).filter(a => a.status !== 'CANCELLED').length}. Insumos: ${(S.data?.inventory || []).length}. Cobros/Movimientos: ${(S.data?.payments || []).length}.`;
+    if (cfg.provider === 'gemini' && cfg.apiKey) {
+      const model = cfg.model || 'gemini-2.5-flash';
+      const gRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(cfg.apiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: `Eres el Asistente Clínico de Abundance Clinic OS. Contexto en vivo: ${ctxSummary}\nConsulta del usuario: ${body?.text || ''}` }] }]
+        })
+      });
+      const gData = await gRes.json().catch(() => ({}));
+      const txt = gData?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (txt) return { answer: txt, source: 'GEMINI_LIVE', externalModel: true };
+    }
+    if ((cfg.provider === 'openai' || !cfg.provider) && cfg.apiKey) {
+      const oRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.apiKey}` },
+        body: JSON.stringify({
+          model: cfg.model || 'gpt-4o-mini',
+          temperature: Number(cfg.temperature ?? 0.3),
+          messages: [
+            { role: 'system', content: `Eres el Asistente Clínico de Abundance Clinic OS. Contexto en vivo: ${ctxSummary}` },
+            { role: 'user', content: body?.text || '' }
+          ]
+        })
+      });
+      const oData = await oRes.json().catch(() => ({}));
+      const txt = oData?.choices?.[0]?.message?.content;
+      if (txt) return { answer: txt, source: 'OPENAI_LIVE', externalModel: true };
+    }
+    return { answer: `IA conectada (${cfg.provider || 'configurada'}). Contexto actual: ${ctxSummary}`, source: 'AI_CONNECTED', externalModel: true };
   }
 
   if (path === '/api/leads/ai-triage' || /^\/api\/leads\/[^/]+\/ai-triage$/.test(path)) {
@@ -2434,8 +2542,12 @@ function portalAuthPage() {
               <input id="p-phone" name="phone" type="tel" required placeholder="Ej: +54 9 11 4000-0000" value="${esc(S.portal.phoneEntered || '')}" class="input" style="width:100%;box-sizing:border-box;padding:10px 14px;border-radius:8px;border:1px solid #d1d5db;font-size:14px">
               <small class="muted" style="font-size:11px;margin-top:5px;display:block">Te enviaremos un código de seguridad para verificar tu identidad.</small>
             </div>
+            <label style="display:flex;align-items:flex-start;gap:8px;font-size:11px;color:#475569;margin-bottom:14px;cursor:pointer;line-height:1.4">
+              <input type="checkbox" name="acceptPrivacy" required checked style="margin-top:2px;width:auto">
+              <span>Acepto el tratamiento confidencial de mis datos de salud conforme la <b>Ley N° 25.326</b> y <b>Ley N° 26.529</b>.</span>
+            </label>
             <div class="form-error" role="alert"></div>
-            <div style="height:10px"></div>
+            <div style="height:6px"></div>
             <button class="btn primary wide" type="submit" style="min-height:44px;border-radius:10px;font-size:13px;font-weight:600;background:#1b4c37;width:100%">
               Continuar con verificación por WhatsApp ${icon('arrow', 14)}
             </button>
@@ -2444,6 +2556,22 @@ function portalAuthPage() {
             <button type="button" class="text-link" data-action="portal-go-register" style="font-size:12.5px;color:#1b4c37;font-weight:600">
               ¿Sos un paciente nuevo? <b>Regístrate aquí →</b>
             </button>
+          </div>
+        ` : step === 'choose-clinic' ? `
+          <div style="text-align:center;margin-bottom:20px">
+            <h2 style="font-size:20px;font-weight:700;color:#0f172a;margin-bottom:6px">Selecciona tu Clínica</h2>
+            <p style="font-size:12.5px;color:#64748b">Tu DNI está registrado en más de un centro médico. Elige a cuál deseas ingresar:</p>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">
+            ${(S.portal.multiClinics || []).map(c => `
+              <button type="button" class="btn" data-action="portal-select-clinic" data-ws="${esc(c.workspaceId)}" style="justify-content:space-between;padding:12px 14px;border:1px solid #cbd5e1;border-radius:10px;background:#f8fbf9">
+                <strong style="color:#18362b">${esc(c.clinicName)}</strong>
+                <span style="color:#1b4c37;font-size:12px;font-weight:700">Ingresar →</span>
+              </button>
+            `).join('')}
+          </div>
+          <div style="text-align:center">
+            <button type="button" class="text-link muted" data-action="portal-go-login" style="font-size:12px">← Volver</button>
           </div>
         ` : step === 'otp' ? `
           <div style="text-align:center;margin-bottom:20px">
@@ -2476,6 +2604,14 @@ function portalAuthPage() {
             <p style="font-size:12.5px;color:#64748b">Crea tu ficha médica para acceder a tus turnos y recetas.</p>
           </div>
           <form data-form="portal-register" class="form-grid">
+            ${!S.portal.clinicId ? `
+              <div class="form-field full">
+                <label for="reg-ws">Clínica / Centro Médico de Atención *</label>
+                <select id="reg-ws" name="workspaceId" required>
+                  ${(S.portal.clinicsList && S.portal.clinicsList.length ? S.portal.clinicsList : [{ id: 'clinic-central', name: 'Clínica Central' }]).map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}
+                </select>
+              </div>
+            ` : `<input type="hidden" name="workspaceId" value="${esc(S.portal.clinicId)}">`}
             <div class="form-field">
               <label for="reg-first">Nombre *</label>
               <input id="reg-first" name="firstName" type="text" required placeholder="Tu nombre">
@@ -2882,7 +3018,7 @@ function portalTabEstudios(records) {
               <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #e2e8f0">
                 <span class="tiny muted" style="display:block;margin-bottom:6px">Archivos adjuntos:</span>
                 ${rec.attachments.map(att => `
-                  <button class="attachment-chip" data-action="view-attachment" data-url="${esc(att.data)}" data-name="${esc(att.name)}" data-type="${esc(att.type)}">
+                  <button class="attachment-chip" data-action="view-attachment" data-url="${esc(att.url || att.data || att.dataUrl || '')}" data-name="${esc(att.name)}" data-type="${esc(att.type)}">
                     ${icon('download', 12)} Ver ${esc(att.name)} (${Math.round((att.size || 0)/1024)} KB)
                   </button>
                 `).join('')}
@@ -2955,14 +3091,63 @@ function portalTabConsentimientos(consents) {
   `;
 }
 
+async function uploadFileToClinicalStorage(file, folder = 'uploads') {
+  const safeName = `${Date.now()}-${String(file.name || 'archivo').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+  const wsId = S.portal?.patient?.workspaceId || S.session?.user?.workspaceId || 'clinic-central';
+  const objectPath = `${wsId}/${folder}/${safeName}`;
+  if (!PREVIEW && typeof SUPABASE_CONFIG !== 'undefined' && SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey) {
+    try {
+      const token = S.session?.token || localStorage.getItem('supabase_token') || SUPABASE_CONFIG.anonKey;
+      const upRes = await fetch(`${SUPABASE_CONFIG.url}/storage/v1/object/clinical-files/${objectPath}`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_CONFIG.anonKey,
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': file.type || 'application/octet-stream',
+          'x-upsert': 'true'
+        },
+        body: file
+      });
+      if (upRes.ok) {
+        const publicUrl = `${SUPABASE_CONFIG.url}/storage/v1/object/public/clinical-files/${objectPath}`;
+        return {
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          url: publicUrl,
+          data: publicUrl,
+          storagePath: objectPath,
+          uploadedAt: new Date().toISOString()
+        };
+      }
+    } catch (e) {
+      console.warn('[storage upload fallback]', e);
+    }
+  }
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = ev => resolve({
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      data: ev.target.result,
+      uploadedAt: new Date().toISOString()
+    });
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function portalBookingDialog() {
   const d = S.portal.data || {};
   const doctors = d.doctors || [];
   const agendas = d.agendas || [];
+  const busySlots = d.busySlots || [];
+  const allTimes = ['09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00'];
 
   showModal(
     'Sacar Nuevo Turno Online',
-    'Elige el profesional, la especialidad y el horario de tu preferencia.',
+    'Elige el profesional, la especialidad y un horario disponible en tiempo real.',
     `<form data-form="portal-booking">
       <div class="form-grid">
         ${selectField('Profesional Médico *', 'doctorId', doctors.map(doc => [doc.id, `${doc.name} (${doc.specialty})`]), doctors[0]?.id, true)}
@@ -2973,24 +3158,11 @@ function portalBookingDialog() {
           ['PROCEDURE', 'Procedimiento / Sesión'],
           ['TELEMEDICINE', 'Telemedicina / Videoconsulta']
         ], 'CONSULTATION')}
-        ${field('Fecha del Turno *', 'date', 'date', plusDays(dateKey(), 1), 'required')}
-        ${selectField('Horario Disponible *', 'time', [
-          ['09:00', '09:00 hs'],
-          ['09:30', '09:30 hs'],
-          ['10:00', '10:00 hs'],
-          ['10:30', '10:30 hs'],
-          ['11:00', '11:00 hs'],
-          ['11:30', '11:30 hs'],
-          ['14:00', '14:00 hs'],
-          ['14:30', '14:30 hs'],
-          ['15:00', '15:00 hs'],
-          ['15:30', '15:30 hs'],
-          ['16:00', '16:00 hs'],
-          ['16:30', '16:30 hs'],
-          ['17:00', '17:00 hs']
-        ], '10:00')}
+        ${field('Fecha del Turno *', 'date', 'date', plusDays(dateKey(), 1), `required min="${dateKey()}"`)}
+        ${selectField('Horario Disponible *', 'time', allTimes.map(t => [t, `${t} hs`]), '10:00')}
         ${area('Motivo de consulta (opcional)', 'notes', '', 'maxlength="300" placeholder="Describe brevemente tus síntomas o motivo de atención..."')}
       </div>
+      <div id="portal-slot-hint" class="tiny muted" style="margin-top:6px">Los horarios ocupados en la agenda del profesional se deshabilitan automáticamente.</div>
       <div class="form-error" role="alert"></div>
       <div class="dialog-actions">
         ${btn('Cancelar', 'close-modal', '', '', 'type="button"')}
@@ -2999,12 +3171,49 @@ function portalBookingDialog() {
     </form>`,
     '', 'wide'
   );
+
+  setTimeout(() => {
+    const docSel = $('#field-doctorId');
+    const dateEl = $('#field-date');
+    const timeSel = $('#field-time');
+    const hintEl = $('#portal-slot-hint');
+    const refreshSlots = () => {
+      if (!docSel || !dateEl || !timeSel) return;
+      const docId = docSel.value;
+      const day = dateEl.value;
+      const docBusy = busySlots.filter(b => b.doctorId === docId && b.startAt && dateKey(b.startAt) === day);
+      let firstFree = '';
+      let occupiedCount = 0;
+      Array.from(timeSel.options).forEach(opt => {
+        const slotStart = Date.parse(`${day}T${opt.value}:00-03:00`);
+        const slotEnd = slotStart + 30 * 60000;
+        const isBusy = docBusy.some(b => {
+          const bs = Date.parse(b.startAt);
+          const be = bs + (Number(b.duration) || 30) * 60000;
+          return slotStart < be && slotEnd > bs;
+        });
+        opt.disabled = isBusy;
+        opt.textContent = isBusy ? `${opt.value} hs (Ocupado)` : `${opt.value} hs (Disponible)`;
+        if (isBusy) occupiedCount++;
+        else if (!firstFree) firstFree = opt.value;
+      });
+      if (timeSel.selectedOptions[0]?.disabled && firstFree) timeSel.value = firstFree;
+      if (hintEl) {
+        hintEl.textContent = occupiedCount
+          ? `${occupiedCount} horario(s) ya reservado(s) para esta fecha; solo puedes elegir horarios disponibles.`
+          : 'Todos los horarios mostrados están disponibles para este profesional.';
+      }
+    };
+    docSel?.addEventListener('change', refreshSlots);
+    dateEl?.addEventListener('change', refreshSlots);
+    refreshSlots();
+  }, 40);
 }
 
 function portalUploadDialog() {
   showModal(
     'Subir Estudio, Laboratorio o Archivo Médico',
-    'El archivo se guardará directamente en tu historia clínica para que lo evalúe el equipo médico.',
+    'El archivo se sube de forma segura al almacenamiento clínico (Supabase Storage) y se clasifica automáticamente para tu médico.',
     `<form data-form="portal-upload-study">
       <div class="form-grid">
         ${field('Título / Nombre del Estudio *', 'title', 'text', '', 'required placeholder="Ej: Laboratorio Completo, Ecografía Abdominal..."', true)}
@@ -3045,22 +3254,17 @@ function portalUploadDialog() {
       const wrap = $('#portal-amount-wrap');
       if (wrap) wrap.style.display = e.target.value === 'PAYMENT_RECEIPT' ? 'block' : 'none';
     });
-    $('#portal-file-picker')?.addEventListener('change', e => {
+    $('#portal-file-picker')?.addEventListener('change', async e => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = ev => {
-        const payload = JSON.stringify([{
-          name: file.name,
-          type: file.type,
-          size: file.size,
-          data: ev.target.result,
-          uploadedAt: new Date().toISOString()
-        }]);
-        if ($('#portal-attachment-payload')) $('#portal-attachment-payload').value = payload;
-        if ($('#portal-file-info')) $('#portal-file-info').innerHTML = `✓ Archivo listo: <b>${esc(file.name)}</b> (${Math.round(file.size / 1024)} KB)`;
-      };
-      reader.readAsDataURL(file);
+      if ($('#portal-file-info')) $('#portal-file-info').innerHTML = `Subiendo archivo seguro a la nube...`;
+      try {
+        const meta = await uploadFileToClinicalStorage(file, 'portal');
+        if ($('#portal-attachment-payload')) $('#portal-attachment-payload').value = JSON.stringify([meta]);
+        if ($('#portal-file-info')) $('#portal-file-info').innerHTML = `✓ Archivo listo (${meta.url ? 'Storage Nube' : 'Adjunto'}): <b>${esc(file.name)}</b> (${Math.round(file.size / 1024)} KB)`;
+      } catch (err) {
+        if ($('#portal-file-info')) $('#portal-file-info').innerHTML = `Error al subir archivo: ${esc(err.message)}`;
+      }
     });
   }, 50);
 }
@@ -4199,7 +4403,7 @@ function recordsView() {
     const rAttachments = r.attachments || r.content?.attachments || [];
     // Tab filter
     if (omniTab === 'estudios') {
-      const isStudy = r.type === 'STUDY' || r.type === 'IMAGE' || (r.type !== 'LAB' && rAttachments.length > 0);
+      const isStudy = r.type === 'STUDY' || r.type === 'IMAGE' || r.type === 'STUDY_ORDER' || (r.type !== 'LAB' && rAttachments.length > 0);
       if (!isStudy) return false;
     } else if (omniTab === 'evoluciones') {
       if (!isEvolutionRecord(r)) return false;
@@ -4211,7 +4415,7 @@ function recordsView() {
     } else if (omniTab === 'signos-vitales') {
       if (r.type !== 'VITALS' && !r.content?.vitals) return false;
     } else if (omniTab === 'documentos') {
-      const hasDocs = r.type === 'DOCUMENT' || rAttachments.length > 0;
+      const hasDocs = r.type === 'DOCUMENT' || r.type === 'STUDY_ORDER' || r.type === 'PRESCRIPTION_EXT' || rAttachments.length > 0;
       if (!hasDocs) return false;
     }
 
@@ -4248,11 +4452,13 @@ function recordsView() {
     return true;
   });
 
-  return heading('Historia Clínica Integral', 'Evoluciones médicas, estudios del portal del paciente, comparativa de evolución, laboratorio y consentimientos inmutables.',
+  return heading('Historia Clínica Integral', 'Evoluciones médicas, estudios del portal del paciente, comparativa de evolución, órdenes de estudio y consentimientos inmutables.',
     `<div class="flex" style="gap:8px;flex-wrap:wrap">
-      <button class="btn small primary" data-action="new-record">${icon('plus', 13)} Nueva Evolución</button>
-      <button class="btn small" data-action="new-attachment">${icon('file', 13)} Cargar Estudio / Lab</button>
+      ${p ? `<button class="btn small" data-action="export-complete-hce" data-id="${p.id}" title="Descargar copia completa de la Historia Clínica conforme Ley 26.529">${icon('download', 13)} Exportar HCE Completa (Ley 26.529)</button>` : ''}
+      <button class="btn small" data-action="new-study-order">${icon('file', 13)} Orden de Estudios</button>
+      <button class="btn small" data-action="new-attachment">${icon('upload', 13)} Cargar Estudio / Lab</button>
       <button class="btn small" data-action="new-vitals">${icon('activity', 13)} Signos Vitales</button>
+      <button class="btn small primary" data-action="new-record">${icon('plus', 13)} Nueva Evolución</button>
     </div>`
   ) +
   `<div class="record-layout">
@@ -5773,23 +5979,18 @@ function recordForm(amendmentId = null) {
       });
     });
 
-    // File picker
-    $('#record-file-picker')?.addEventListener('change', e => {
+    // File picker (Supabase Storage + fallback)
+    $('#record-file-picker')?.addEventListener('change', async e => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = ev => {
-        const payload = JSON.stringify([{
-          name: file.name,
-          type: file.type,
-          size: file.size,
-          data: ev.target.result,
-          uploadedAt: new Date().toISOString()
-        }]);
-        if ($('#record-attachment-payload')) $('#record-attachment-payload').value = payload;
-        if ($('#record-file-info')) $('#record-file-info').innerHTML = `✓ Archivo cargado: <b>${esc(file.name)}</b> (${Math.round(file.size / 1024)} KB)`;
-      };
-      reader.readAsDataURL(file);
+      if ($('#record-file-info')) $('#record-file-info').innerHTML = `Subiendo archivo seguro a la nube...`;
+      try {
+        const meta = await uploadFileToClinicalStorage(file, 'records');
+        if ($('#record-attachment-payload')) $('#record-attachment-payload').value = JSON.stringify([meta]);
+        if ($('#record-file-info')) $('#record-file-info').innerHTML = `✓ Archivo cargado (${meta.url ? 'Storage Nube' : 'Adjunto'}): <b>${esc(file.name)}</b> (${Math.round(file.size / 1024)} KB)`;
+      } catch (err) {
+        if ($('#record-file-info')) $('#record-file-info').innerHTML = `Error: ${esc(err.message)}`;
+      }
     });
   }, 50);
 }
@@ -5827,22 +6028,17 @@ function uploadStudyDialog(patientId = null) {
   );
 
   setTimeout(() => {
-    $('#study-file-picker')?.addEventListener('change', e => {
+    $('#study-file-picker')?.addEventListener('change', async e => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = ev => {
-        const payload = JSON.stringify([{
-          name: file.name,
-          type: file.type,
-          size: file.size,
-          data: ev.target.result,
-          uploadedAt: new Date().toISOString()
-        }]);
-        if ($('#study-attachment-payload')) $('#study-attachment-payload').value = payload;
-        if ($('#study-file-info')) $('#study-file-info').innerHTML = `✓ Archivo listo: <b>${esc(file.name)}</b> (${Math.round(file.size / 1024)} KB)`;
-      };
-      reader.readAsDataURL(file);
+      if ($('#study-file-info')) $('#study-file-info').innerHTML = `Subiendo archivo seguro a la nube...`;
+      try {
+        const meta = await uploadFileToClinicalStorage(file, 'studies');
+        if ($('#study-attachment-payload')) $('#study-attachment-payload').value = JSON.stringify([meta]);
+        if ($('#study-file-info')) $('#study-file-info').innerHTML = `✓ Archivo listo (${meta.url ? 'Storage Nube' : 'Adjunto'}): <b>${esc(file.name)}</b> (${Math.round(file.size / 1024)} KB)`;
+      } catch (err) {
+        if ($('#study-file-info')) $('#study-file-info').innerHTML = `Error: ${esc(err.message)}`;
+      }
     });
   }, 50);
 }
@@ -5860,6 +6056,161 @@ function vitalsDialog(patientId = null) {
     area('Observaciones clínicas adicionales', 'notes', '', 'placeholder="Detalle o síntomas durante la toma de signos..."'),
     'Guardar Signos Vitales'
   );
+}
+
+const STUDY_ORDER_PANELS = [
+  {
+    label: 'Rutina Metabólica & Medicina Integrativa',
+    text: 'Solicito:\n- Hemograma completo con recuento de plaquetas\n- Glucemia en ayunas, Insulinemia basal e Índice HOMA-IR\n- Hemoglobina glicosilada (HbA1c)\n- Hepatograma completo (GOT, GPT, FAL, GGT, Bilirrubina total y directa)\n- Función renal (Urea, Creatinina, Ionograma)\n- Perfil lipídico completo + ApoB\n- Proteína C Reactiva Ultrasensible (PCR-us) y Homocisteína'
+  },
+  {
+    label: 'Perfil Tiroideo & Vitaminas / Micronutrientes',
+    text: 'Solicito:\n- TSH, T4 Libre, T3 Libre, Anticuerpos ATPO y ATG\n- 25-OH Vitamina D total\n- Vitamina B12, Ácido Fólico y Ferritina sérica\n- Magnesio sérico / eritrocitario y Zinc sérico'
+  },
+  {
+    label: 'Perfil Hormonal Completo',
+    text: 'Solicito:\n- Cortisol matinal (08:00 hs) y DHEA-S\n- Testosterona total y libre, SHBG\n- Estradiol, FSH, LH, Prolactina'
+  },
+  {
+    label: 'Diagnóstico por Imágenes (Ecografía / Doppler)',
+    text: 'Solicito:\n- Ecografía Abdominal y Hepatobiliopancreática\n- Eco-Doppler de Vasos de Cuello\nDiag. Presuntivo: Evaluación vascular y metabólica integral.'
+  }
+];
+
+function studyOrderDialog(patientId = null) {
+  const p = patientId ? patientBy(patientId) : (S.selectedPatient ? patientBy(S.selectedPatient) : S.data.patients[0]);
+  const allDocs = (S.data?.staff || S.data?.doctors || []).filter(d => d.role === 'DOCTOR' || d.licenseNumber || d.specialty);
+  const docs = allDocs.length ? allDocs : (S.data?.doctors || []);
+
+  formDialog('study-order', 'Nueva Orden Médica de Estudios (Laboratorio / Imágenes)',
+    'Genera la solicitud oficial de análisis o estudios complementarios con diagnóstico, firma digital y matrícula.',
+    patientSelect(p?.id) +
+    selectField('Médico Solicitante *', 'doctorId', docs.map(d => [d.id, `${d.name} (${d.licenseNumber || 'M.N.'})`]), S.doctor || docs[0]?.id) +
+    field('Diagnóstico Presuntivo / CIE-10 *', 'diagnosis', 'text', 'Control clínico preventivo y evaluación metabólica (Z00.0)', 'required maxlength="200"', true) +
+    `<div class="form-field full" style="background:#f8fbf9;border:1px solid #d5e3d8;border-radius:10px;padding:10px 12px">
+      <label style="font-size:12px;font-weight:700;color:#1b4c37;margin-bottom:6px;display:block">Plantillas Rápidas de Estudios:</label>
+      <div class="flex" style="gap:6px;flex-wrap:wrap">
+        ${STUDY_ORDER_PANELS.map((sp, i) => `<button type="button" class="btn small study-panel-preset" data-idx="${i}">${icon('plus', 11)} ${esc(sp.label)}</button>`).join('')}
+      </div>
+    </div>` +
+    area('Estudios Solicitados *', 'orderText', STUDY_ORDER_PANELS[0].text, 'required style="height:150px"', true) +
+    field('Indicaciones previas (ej: Ayuno 8-12 hs)', 'prepNotes', 'text', 'Presentarse con 8 a 12 horas de ayuno previo.', '', true),
+    'Guardar e Imprimir Orden de Estudios', '', 'wide'
+  );
+
+  setTimeout(() => {
+    document.querySelectorAll('.study-panel-preset').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const panel = STUDY_ORDER_PANELS[Number(btn.dataset.idx)];
+        const areaEl = $('#field-orderText');
+        if (panel && areaEl) {
+          areaEl.value = panel.text;
+        }
+      });
+    });
+  }, 40);
+}
+
+function printStudyOrderDocument(recordId) {
+  const r = (S.data?.records || []).find(x => x.id === recordId);
+  if (!r) return toast('Orden de estudios no encontrada.', true);
+  const c = typeof r.content === 'object' && r.content ? r.content : {};
+  const p = patientBy(r.patientId);
+  const doc = resolveDoctorForDoc(c.doctorId, r.author);
+  const clinicName = S.data?.workspace?.name || 'Abundance Clinic OS';
+  const win = window.open('', '_blank');
+  if (!win) return toast('Habilita las ventanas emergentes para imprimir la orden.', true);
+  win.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Orden de Estudios · ${esc(nameOf(p))}</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#0f172a;margin:0;padding:24px;background:#eef3f0}
+    .page{max-width:720px;margin:0 auto;background:#fff;padding:34px;border-radius:10px;border:1.5px solid #cbd5e1}
+    .btn{padding:9px 16px;border-radius:7px;border:none;background:#1b4c37;color:#fff;font-weight:700;cursor:pointer}
+    .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2.5px solid #1b4c37;padding-bottom:14px;margin-bottom:16px}
+    .box{background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px}
+    .body{border:1.5px solid #1b4c37;border-radius:10px;padding:18px 20px;min-height:190px;white-space:pre-wrap;font-size:14px;line-height:1.65;margin-bottom:20px}
+    @media print{.actions{display:none}body{background:#fff;padding:0}.page{border:none}}
+  </style></head><body>
+  <div class="actions" style="max-width:720px;margin:0 auto 12px;text-align:right"><button class="btn" onclick="window.print()">Imprimir / Guardar PDF</button></div>
+  <div class="page">
+    <div class="head">
+      <div><strong style="font-size:19px;color:#1b4c37">${esc(clinicName)}</strong><br><small>${esc(doc.name)} · ${esc(doc.licenseNumber)} · ${esc(doc.specialty)}</small></div>
+      <div style="text-align:right"><span style="background:#1b4c37;color:#fff;font-size:11px;font-weight:800;padding:4px 10px;border-radius:4px">ORDEN DE ESTUDIOS MÉDICOS</span><br><small>Fecha: ${fmtDate(r.createdAt, true)}</small></div>
+    </div>
+    <div class="box">
+      <b>Paciente:</b> ${esc(nameOf(p))} · <b>DNI:</b> ${esc(p?.dni || '—')} · <b>Obra Social:</b> ${esc(p?.coverage || 'Particular')} ${p?.affiliateNumber ? `(N° ${esc(p.affiliateNumber)})` : ''}<br>
+      <b>Diagnóstico:</b> ${esc(c.diagnosis || r.problem || 'Evaluación clínica')}
+    </div>
+    <div class="body">${esc(c.notes || c.text || '')}</div>
+    ${c.prepNotes ? `<div style="font-size:12px;color:#334155;background:#f0fdf4;border:1px solid #bbf7d0;padding:10px 14px;border-radius:8px;margin-bottom:18px"><b>Indicaciones de preparación:</b> ${esc(c.prepNotes)}</div>` : ''}
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;border-top:1px solid #e2e8f0;padding-top:14px">
+      <div style="font-size:11px;color:#64748b">Orden emitida electrónicamente · Ref: ${esc(r.id)}<br>Válida para presentación en laboratorios y centros de diagnóstico.</div>
+      ${renderSignatureStampHtml(doc)}
+    </div>
+  </div></body></html>`);
+  win.document.close();
+}
+
+const _hceReadLogged = new Set();
+function logHceReadAccess(patientId) {
+  if (!patientId || _hceReadLogged.has(patientId)) return;
+  _hceReadLogged.add(patientId);
+  api('/api/audit/hce-read', 'POST', {
+    patientId,
+    details: `Acceso de lectura a Historia Clínica del paciente ${nameOf(patientBy(patientId))} (Trazabilidad Ley 26.529).`
+  }).catch(() => {});
+}
+
+function printCompleteHceDocument(patientId) {
+  const p = patientBy(patientId);
+  if (!p) return toast('Paciente no encontrado.', true);
+  logHceReadAccess(patientId);
+  const clinicName = S.data?.workspace?.name || 'Abundance Clinic OS';
+  const mh = p.medicalHistory || {};
+  const recs = (S.data?.records || []).filter(r => r.patientId === patientId);
+  const prescs = (S.data?.prescriptions || []).filter(r => r.patientId === patientId);
+  const consents = (S.data?.consents || []).filter(c => c.patientId === patientId);
+  const win = window.open('', '_blank');
+  if (!win) return toast('Habilita las ventanas emergentes para exportar la HCE.', true);
+  win.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>HCE Completa · ${esc(nameOf(p))}</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#0f172a;margin:0;padding:24px;background:#f8faf8;line-height:1.5}
+    .page{max-width:820px;margin:0 auto;background:#fff;padding:36px;border-radius:10px;border:1px solid #cbd5e1}
+    .btn{padding:10px 18px;border-radius:7px;border:none;background:#1b4c37;color:#fff;font-weight:700;cursor:pointer}
+    h2{color:#1b4c37;border-bottom:2px solid #1b4c37;padding-bottom:6px;margin-top:24px;font-size:16px}
+    .card{border:1px solid #dbe4dc;border-radius:8px;padding:12px 16px;margin-bottom:12px;background:#fcfdfc}
+    .hash{font-family:monospace;font-size:10.5px;color:#475569;margin-top:6px;border-top:1px dashed #cbd5e1;padding-top:4px}
+    @media print{.actions{display:none}body{background:#fff;padding:0}.page{border:none}}
+  </style></head><body>
+  <div class="actions" style="max-width:820px;margin:0 auto 12px;text-align:right"><button class="btn" onclick="window.print()">Imprimir / Descargar HCE Completa (PDF)</button></div>
+  <div class="page">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1b4c37;padding-bottom:14px">
+      <div><strong style="font-size:20px;color:#1b4c37">${esc(clinicName)}</strong><br><small>Copia Certificada de Historia Clínica Electrónica · Ley Nacional N° 26.529</small></div>
+      <div style="text-align:right;font-size:12px">Emitida: ${fmtDate(new Date().toISOString(), true)} ${fmtTime(new Date().toISOString())} hs<br>Total registros: ${recs.length}</div>
+    </div>
+    <h2>1. Datos Filiatorios y Antecedentes (Perfil Permanente)</h2>
+    <div class="card" style="font-size:13px">
+      <b>Paciente:</b> ${esc(nameOf(p))} · <b>DNI:</b> ${esc(p.dni || '—')} · <b>Cobertura:</b> ${esc(p.coverage || 'Particular')} ${p.affiliateNumber ? `(N° ${esc(p.affiliateNumber)})` : ''}<br>
+      <b>Alergias:</b> ${esc(mh.allergies || 'Sin alergias reportadas')} · <b>Patologías:</b> ${esc(mh.pathological || 'Ninguna')}<br>
+      <b>Medicación habitual:</b> ${esc(mh.medications || 'Ninguna')} · <b>Cirugías:</b> ${esc(mh.surgical || 'Ninguna')}
+    </div>
+    <h2>2. Evoluciones, Terapias, Estudios y Signos Vitales (${recs.length})</h2>
+    ${recs.map(r => {
+      const c = typeof r.content === 'object' && r.content ? r.content : {};
+      const bodyTxt = c.html ? c.html : esc(c.notes || c.text || c.subjective || r.problem || r.title || 'Registro asentado');
+      return `<div class="card">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:#475569;margin-bottom:6px">
+          <span><b>${esc(r.author || 'Profesional')}</b> · ${esc(r.problem || r.title || r.type || 'Evolución')}</span>
+          <span>${fmtDate(r.createdAt, true)} ${fmtTime(r.createdAt)}</span>
+        </div>
+        <div style="font-size:13px">${bodyTxt}</div>
+        <div class="hash">SHA-256: ${esc(r.hash || 'Verificado')} · Previo: ${esc((r.previousHash || '').slice(0, 24))}</div>
+      </div>`;
+    }).join('') || '<p>Sin evoluciones registradas.</p>'}
+    <h2>3. Recetas Electrónicas (${prescs.length}) y Consentimientos Informados (${consents.length})</h2>
+    ${prescs.map(pr => `<div class="card" style="font-size:12.5px"><b>Receta ${esc(pr.cuir || pr.id)}</b> (${fmtDate(pr.createdAt, true)}) · ${esc(pr.doctorName || '')} (${esc(pr.doctorLicense || '')})<br>${esc(pr.content)}</div>`).join('') || '<p style="font-size:12.5px;color:#64748b">Sin recetas emitidas.</p>'}
+    ${consents.map(ct => `<div class="card" style="font-size:12.5px"><b>Consentimiento: ${esc(ct.title)}</b> (${fmtDate(ct.signedAt || ct.createdAt, true)}) · Firmado bilateralmente (${esc(ct.hash || '')})</div>`).join('') || ''}
+  </div></body></html>`);
+  win.document.close();
 }
 
 function renderBarcodeSvg(codeStr = 'AR-CUIR-2026') {
@@ -7780,8 +8131,10 @@ document.addEventListener('click', async e => {
         }
         break;
       }
-      case 'select-record-patient': S.selectedPatient = id; contentOnly(); break;
-      case 'open-patient-records': S.selectedPatient = id; closeModal(); await navigate('records'); break;
+      case 'select-record-patient': S.selectedPatient = id; logHceReadAccess(id); contentOnly(); break;
+      case 'open-patient-records': S.selectedPatient = id; logHceReadAccess(id); closeModal(); await navigate('records'); break;
+      case 'export-complete-hce': printCompleteHceDocument(id || S.selectedPatient); break;
+      case 'new-study-order': studyOrderDialog(el.dataset.patientId || S.selectedPatient); break;
       case 'record-tab': S.recordTab = el.dataset.value; contentOnly(); break;
       case 'omni-tab': S.omniTab = el.dataset.value; contentOnly(); break;
       case 'hcd-filter-chip':
@@ -8091,6 +8444,28 @@ document.addEventListener('click', async e => {
       // Portal del Paciente
       case 'portal-go-register': {
         S.portal.step = 'register';
+        if (!S.portal.clinicsList?.length) {
+          try {
+            const res = await api('/api/portal/clinics');
+            S.portal.clinicsList = res.clinics || [];
+          } catch {}
+        }
+        render();
+        break;
+      }
+      case 'portal-select-clinic': {
+        const wsId = el.dataset.ws;
+        if (!wsId) break;
+        const res = await api('/api/portal/auth/request-otp', 'POST', {
+          dni: S.portal.dniEntered,
+          phone: S.portal.phoneEntered,
+          workspaceId: wsId
+        });
+        S.portal.clinicId = wsId;
+        S.portal.phoneMasked = res.phoneMasked || res.maskedPhone;
+        S.portal.demoCode = res.demoCode;
+        S.portal.step = 'otp';
+        toast('Código de verificación enviado por WhatsApp.');
         render();
         break;
       }
@@ -8269,6 +8644,31 @@ document.addEventListener('submit', async e => {
         S.view = 'records';
         S.omniTab = (stType === 'LAB') ? 'laboratorio' : 'estudios';
         message = 'Estudio / archivo cargado exitosamente en el historial.';
+        break;
+      }
+      case 'study-order': {
+        const doc = resolveDoctorForDoc(b.doctorId);
+        const created = await api('/api/records', 'POST', {
+          patientId: b.patientId,
+          type: 'STUDY_ORDER',
+          problem: `Orden de Estudios · ${b.diagnosis || 'Evaluación'}`,
+          specialty: doc.specialty || 'Medicina Integrativa',
+          title: 'Orden Médica de Estudios',
+          content: {
+            title: 'Orden Médica de Estudios',
+            diagnosis: b.diagnosis || '',
+            doctorId: b.doctorId || doc.id,
+            notes: b.orderText || '',
+            prepNotes: b.prepNotes || ''
+          }
+        });
+        S.selectedPatient = b.patientId;
+        S.view = 'records';
+        S.omniTab = 'estudios';
+        message = 'Orden de estudios guardada en la historia clínica.';
+        if (created?.id) {
+          setTimeout(() => printStudyOrderDocument(created.id), 250);
+        }
         break;
       }
       case 'vitals': {
@@ -8498,10 +8898,19 @@ document.addEventListener('submit', async e => {
         return;
       }
       case 'portal-request-code': {
-        const res = await api('/api/portal/auth/request-otp', 'POST', b);
+        const res = await api('/api/portal/auth/request-otp', 'POST', { ...b, workspaceId: S.portal.clinicId || '' });
         S.portal.dniEntered = b.dni;
         S.portal.phoneEntered = b.phone;
-        S.portal.phoneMasked = res.maskedPhone;
+        if (res.exists === false) {
+          throw Error(res.message || 'No encontramos una ficha con ese DNI. Usa "Regístrate aquí" para crear tu ficha.');
+        }
+        if (res.multiClinic && Array.isArray(res.clinics)) {
+          S.portal.multiClinics = res.clinics;
+          S.portal.step = 'choose-clinic';
+          render();
+          return;
+        }
+        S.portal.phoneMasked = res.phoneMasked || res.maskedPhone;
         S.portal.demoCode = res.demoCode;
         S.portal.step = 'otp';
         toast('Código de verificación enviado por WhatsApp.');
@@ -8874,6 +9283,13 @@ async function boot() {
 
   if (location.pathname.startsWith('/portal')) {
     S.view = 'portal';
+    const urlClinic = new URLSearchParams(location.search).get('clinic');
+    if (urlClinic) {
+      S.portal.clinicId = urlClinic;
+      localStorage.setItem('portal_clinic_id', urlClinic);
+    } else {
+      S.portal.clinicId = localStorage.getItem('portal_clinic_id') || '';
+    }
     const pTok = localStorage.getItem('portal_token');
     if (pTok) {
       S.portal.token = pTok;
