@@ -5921,8 +5921,8 @@ function renderComparativeEvolutionPanel(p, allPatientRecords) {
 }
 
 function recordsView() {
-  if (!S.selectedPatient || !patientBy(S.selectedPatient)) S.selectedPatient = S.data.patients[0]?.id || null;
-  const p = patientBy(S.selectedPatient);
+  if (S.selectedPatient && !patientBy(S.selectedPatient)) S.selectedPatient = null;
+  const p = S.selectedPatient ? patientBy(S.selectedPatient) : null;
   const allPatientRecords = S.data.records.filter(r => r.patientId === S.selectedPatient);
   const prescriptions = S.data.prescriptions.filter(r => r.patientId === S.selectedPatient);
   const consents = (S.data.consents || []).filter(c => c.patientId === S.selectedPatient);
@@ -5997,13 +5997,14 @@ function recordsView() {
   );
 
   return heading('Historia Clínica Integral', 'Evoluciones médicas, estudios del portal del paciente, comparativa de evolución, órdenes de estudio y consentimientos inmutables.',
-    `<div class="flex" style="gap:8px;flex-wrap:wrap">
-      ${p ? `<button class="btn small" data-action="export-complete-hce" data-id="${p.id}" title="Descargar copia completa de la Historia Clínica conforme Ley 26.529">${icon('download', 13)} Exportar HCE (Ley 26.529)</button>` : ''}
+    p ? `<div class="flex" style="gap:8px;flex-wrap:wrap">
+      <button class="btn small" data-action="clear-record-patient" title="Volver al listado de pacientes">← Todos los pacientes</button>
+      <button class="btn small" data-action="export-complete-hce" data-id="${p.id}" title="Descargar copia completa de la Historia Clínica conforme Ley 26.529">${icon('download', 13)} Exportar HCE (Ley 26.529)</button>
       <button class="btn small" data-action="new-study-order">${icon('file', 13)} Orden de Estudios</button>
       <button class="btn small" data-action="new-attachment">${icon('upload', 13)} Cargar Estudio / Lab</button>
       <button class="btn small" data-action="new-vitals">${icon('activity', 13)} Signos Vitales</button>
       <button class="btn small primary" data-action="new-record">${icon('plus', 13)} Nueva Evolución</button>
-    </div>`
+    </div>` : ''
   ) +
   `<div class="record-layout-full">
     ${p ? `
@@ -6206,7 +6207,33 @@ function recordsView() {
             `)}
           </main>
         </div>
-      ` : empty('Selecciona un paciente', 'Selecciona un paciente para visualizar su historial.')}
+      ` : `
+        <section class="panel" style="padding:20px">
+          <div class="between" style="margin-bottom:14px;gap:12px;flex-wrap:wrap">
+            <div>
+              <h2 style="margin:0 0 4px">Seleccionar Paciente para Historia Clínica</h2>
+              <p class="panel-sub" style="margin:0">Elegí un paciente del directorio o buscalo por nombre, DNI, cobertura o teléfono.</p>
+            </div>
+            <div class="omni-search-box" style="max-width:380px;flex:1;min-width:240px">
+              <span class="omni-search-icon">${icon('search', 14)}</span>
+              <input id="record-patient-search" type="search" class="omni-search-input" data-input="record-patient-search" placeholder="Buscar por nombre, DNI, cobertura o teléfono..." value="${esc(S.recordPatientSearch || '')}">
+            </div>
+          </div>
+          <div class="tiny muted" style="margin-bottom:10px">Mostrando ${visiblePatients.length} de ${S.data.patients.length} pacientes</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;max-height:560px;overflow-y:auto">
+            ${visiblePatients.map((pat, i) => `
+              <button type="button" class="patient-choice" data-action="select-record-patient" data-id="${pat.id}" style="text-align:left;border:1px solid #e2e8e2;border-radius:10px;padding:10px 12px;background:#ffffff;display:flex;align-items:center;gap:10px;cursor:pointer">
+                ${avatar(nameOf(pat), i)}
+                <div style="min-width:0;flex:1">
+                  <div class="patient-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(nameOf(pat))}</div>
+                  <div class="patient-sub">${esc(pat.dni ? `DNI ${pat.dni}` : 'Sin DNI')} · ${esc(pat.coverage || 'Particular')}</div>
+                </div>
+                ${icon('chevron', 13)}
+              </button>
+            `).join('') || empty('Sin resultados', 'No se encontraron pacientes que coincidan con la búsqueda.')}
+          </div>
+        </section>
+      `}
   </div>`;
 }
 
@@ -9818,6 +9845,11 @@ document.addEventListener('click', async e => {
         S.selectedPatient = id;
         S.patientPickerOpen = false;
         logHceReadAccess(id);
+        contentOnly();
+        break;
+      case 'clear-record-patient':
+        S.selectedPatient = null;
+        S.patientPickerOpen = false;
         contentOnly();
         break;
       case 'toggle-patient-picker':
