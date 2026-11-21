@@ -2042,6 +2042,23 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     return { ok: true, latencyMs: 42, message: `Credenciales de ${item.name} validadas correctamente.` };
   }
 
+  if (path === '/api/admin/integrations/highlevel/sync' && method === 'POST') {
+    const sRes = await fetch(`${SUPABASE_CONFIG.url}/functions/v1/ghl-outbound`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_CONFIG.anonKey,
+        'Authorization': `Bearer ${SUPABASE_CONFIG.anonKey}`
+      },
+      body: JSON.stringify({ action: 'pull-appointments', workspaceId: currentWorkspaceId })
+    });
+    const sData = await sRes.json().catch(() => ({}));
+    if (!sRes.ok || !sData.ok) {
+      throw Error(sData.error || sData.message || 'No se pudo sincronizar el calendario de GoHighLevel.');
+    }
+    return sData;
+  }
+
   if (path === '/api/state') {
     const [wsRes, patRes, docRes, apptRes, leadRes, recRes, invRes, setRes, integRes, usrRes, agRes, qtRes, cstRes, prsRes, moRes, payRes, invcRes, audRes] = await Promise.all([
       fetch(`${SUPABASE_CONFIG.url}/rest/v1/workspaces?id=eq.${currentWorkspaceId}`, { headers: authHeaders }).catch(() => null),
@@ -2074,6 +2091,23 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     const settings = (await setRes?.json?.().catch(() => []))?.[0]?.value || { pauseBilling: false, pauseWebhooks: false, pauseAssistant: false };
     const rawIntegrations = (await integRes?.json?.().catch(() => [])) || [];
     const integrations = rawIntegrations.filter(i => !i.workspace_id || i.workspace_id === currentWorkspaceId);
+    const ghlConnected = integrations.some(i => i.id === 'highlevel' && i.status === 'CONNECTED');
+    if (ghlConnected && typeof window !== 'undefined' && (!window._lastGhlPullAt || Date.now() - window._lastGhlPullAt > 30000)) {
+      window._lastGhlPullAt = Date.now();
+      fetch(`${SUPABASE_CONFIG.url}/functions/v1/ghl-outbound`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_CONFIG.anonKey,
+          'Authorization': `Bearer ${SUPABASE_CONFIG.anonKey}`
+        },
+        body: JSON.stringify({ action: 'pull-appointments', workspaceId: currentWorkspaceId })
+      }).then(r => r.json()).then(d => {
+        if ((d?.imported || 0) > 0 || (d?.updated || 0) > 0) {
+          if (typeof refresh === 'function') refresh();
+        }
+      }).catch(() => {});
+    }
     const rawUsers = (await usrRes?.json?.().catch(() => [])) || [];
     const rawAgendas = (await agRes?.json?.().catch(() => [])) || [];
     const rawQuotes = (await qtRes?.json?.().catch(() => [])) || [];
@@ -9490,6 +9524,7 @@ function configIntegrationDialog(id) {
       <div class="form-grid">${fields}</div>
       <div class="form-error" role="alert"></div>
       <div class="dialog-actions">
+        ${isConnected && id === 'highlevel' ? btn('Sincronizar Turnos GHL', 'sync-ghl-appointments', 'calendar', '', `type="button" data-id="${id}"`) : ''}
         ${isConnected ? btn('Probar Conexión en Vivo', 'test-integration-live', 'refresh', '', `type="button" data-id="${id}"`) : ''}
         ${isConnected ? btn('Desconectar servicio', 'disconnect-integration', 'warning', 'danger', `type="button" data-id="${id}"`) : ''}
         ${btn('Cancelar', 'close-modal', '', '', 'type="button"')}
@@ -9985,6 +10020,21 @@ document.addEventListener('click', async e => {
         try {
           const res = await api('/api/admin/integrations/' + id + '/test', 'POST', {});
           toast(`Conexión verificada: ${res.latencyMs}ms (${res.message})`);
+        } catch (err) {
+          toast(err.message, true);
+        } finally {
+          el.disabled = false;
+        }
+        break;
+      }
+      case 'sync-ghl-appointments': {
+        el.disabled = true;
+        try {
+          const res = await api('/api/admin/integrations/highlevel/sync', 'POST', {});
+          await refresh();
+          render();
+          const errNote = res.errors?.length ? ` · Avisos: ${res.errors.join(', ')}` : '';
+          toast(`Sincronización GHL completa · Importados: ${res.imported || 0}, Actualizados: ${res.updated || 0}${errNote}`);
         } catch (err) {
           toast(err.message, true);
         } finally {
