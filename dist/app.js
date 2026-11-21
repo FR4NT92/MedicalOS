@@ -619,7 +619,7 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
         },
         body: JSON.stringify({ action: 'pull-appointments', workspaceId: currentWorkspaceId })
       }).then(r => r.json()).then(d => {
-        if ((d?.imported || 0) > 0 || (d?.updated || 0) > 0) {
+        if ((d?.imported || 0) > 0 || (d?.updated || 0) > 0 || (d?.contactsImported || 0) > 0 || (d?.contactsEnriched || 0) > 0) {
           if (typeof refresh === 'function') refresh();
         }
       }).catch(() => {});
@@ -1091,11 +1091,15 @@ async function supabaseApi(path, method = 'GET', body = null, headers = {}) {
     if (body.notes !== undefined) updateData.notes = body.notes;
     if (body.medicalHistory) updateData.medical_history = body.medicalHistory;
 
-    await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?id=eq.${patId}&workspace_id=eq.${currentWorkspaceId}`, {
+    const pRes = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/patients?id=eq.${patId}&workspace_id=eq.${currentWorkspaceId}`, {
       method: 'PATCH',
-      headers: authHeaders,
+      headers: { ...authHeaders, 'Prefer': 'return=representation' },
       body: JSON.stringify(updateData)
     });
+    const updatedPat = (await pRes.json().catch(() => []))?.[0];
+    if (updatedPat) {
+      triggerGhlOutbound('upsert-contact', { workspaceId: currentWorkspaceId, contact: updatedPat });
+    }
     return { id: patId, ...updateData };
   }
 
@@ -8547,7 +8551,7 @@ document.addEventListener('click', async e => {
           await refresh();
           render();
           const errNote = res.errors?.length ? ` · Avisos: ${res.errors.join(', ')}` : '';
-          toast(`Sincronización GHL completa · Importados: ${res.imported || 0}, Actualizados: ${res.updated || 0}${errNote}`);
+          toast(`Sincronización GHL · Contactos: +${res.contactsImported || 0} nuevos / ${res.contactsEnriched || 0} actualizados · Turnos: +${res.imported || 0} nuevos / ${res.updated || 0} actualizados${errNote}`);
         } catch (err) {
           toast(err.message, true);
         } finally {
