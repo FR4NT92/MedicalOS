@@ -2935,6 +2935,7 @@ function portalTabTurnos(appointments, d) {
             <div class="between" style="flex-wrap:wrap">
               <span class="tiny muted">Motivo: ${esc(a.type || 'Consulta Médica')} ${a.notes ? '· ' + esc(a.notes) : ''}</span>
               <div class="flex" style="gap:8px">
+                ${a.type === 'TELEMEDICINE' ? `<button class="btn small primary" data-action="join-telemedicine" data-id="${a.id}" style="background:#1b4c37">${icon('spark', 12)} Ingresar a Videoconsulta</button>` : ''}
                 <button class="btn small danger" data-action="portal-cancel-appointment" data-id="${a.id}">
                   Cancelar Turno
                 </button>
@@ -3010,11 +3011,16 @@ function portalTabEstudios(records) {
     <div class="between" style="margin-bottom:20px;flex-wrap:wrap">
       <div>
         <h2 style="font-size:20px;font-weight:700;color:#18362b;margin:0 0 4px 0">Estudios Médicos y Análisis de Laboratorio</h2>
-        <p style="font-size:13px;color:#64748b;margin:0">Sube tus análisis y accede a los informes médicos alojados en tu ficha digital.</p>
+        <p style="font-size:13px;color:#64748b;margin:0">Sube tus análisis, registra tus mediciones en casa y accede a los informes médicos de tu ficha digital.</p>
       </div>
-      <button class="btn primary" data-action="portal-open-upload" style="background:#1b4c37">
-        ${icon('upload', 14)} Subir Nuevo Estudio / Lab
-      </button>
+      <div class="flex" style="gap:8px;flex-wrap:wrap">
+        <button class="btn" data-action="portal-open-vitals" style="border-color:#bbf7d0;background:#f0fdf4;color:#1b4c37">
+          ${icon('activity', 14)} Registrar Medición en Casa
+        </button>
+        <button class="btn primary" data-action="portal-open-upload" style="background:#1b4c37">
+          ${icon('upload', 14)} Subir Nuevo Estudio / Lab
+        </button>
+      </div>
     </div>
 
     <section class="panel">
@@ -3300,6 +3306,111 @@ function portalUploadDialog() {
       }
     });
   }, 50);
+}
+
+const CIE10_CATALOG = [
+  'E11.9 · Diabetes mellitus tipo 2',
+  'E10.9 · Diabetes mellitus tipo 1',
+  'I10 · Hipertensión arterial esencial',
+  'E66.9 · Obesidad / Sobrepeso',
+  'E78.5 · Dislipidemia / Hipercolesterolemia',
+  'E03.9 · Hipotiroidismo',
+  'E55.9 · Deficiencia de Vitamina D',
+  'R53 · Fatiga crónica / Astenia',
+  'G43.9 · Migraña / Cefalea',
+  'K58.9 · Síndrome de intestino irritable',
+  'F41.1 · Trastorno de ansiedad generalizada',
+  'G47.0 · Insomnio / Trastornos del sueño',
+  'M54.5 · Lumbalgia / Dolor lumbar',
+  'J30.4 · Rinitis alérgica',
+  'L70.0 · Acné vulgar',
+  'L98.9 · Evaluación estética / Rejuvenecimiento',
+  'Z00.0 · Control clínico preventivo',
+  'Z48.8 · Control post-operatorio',
+  'Z71.3 · Asesoramiento y vigilancia dietética (Nutrición)'
+];
+
+function openTelemedicineRoom(apptId) {
+  const cleanId = String(apptId || '').replace(/[^a-zA-Z0-9]/g, '') || makeId().slice(0, 8);
+  const roomUrl = `https://meet.jit.si/AbundanceClinic-${cleanId}`;
+  showModal(
+    'Sala de Telemedicina en Vivo',
+    'Videoconsulta segura integrada en el turno médico.',
+    `<div style="margin-bottom:12px">
+      <iframe src="${esc(roomUrl)}#config.prejoinPageEnabled=false" allow="camera; microphone; fullscreen; display-capture; autoplay" style="width:100%;height:460px;border:1px solid #cbd5e1;border-radius:10px;background:#0f172a"></iframe>
+    </div>
+    <div class="dialog-actions">
+      <button type="button" class="btn" data-action="close-modal">Cerrar sala</button>
+      <a href="${esc(roomUrl)}" target="_blank" rel="noopener" class="btn primary">${icon('spark', 13)} Abrir en nueva pestaña</a>
+    </div>`,
+    '', 'wide'
+  );
+}
+
+function portalVitalsDialog() {
+  showModal(
+    'Registrar Medición en Casa',
+    'Tus registros se sincronizan en tiempo real con la Historia Clínica de tu médico (Comparativa Paciente vs. Médico).',
+    `<form data-form="portal-vitals">
+      <div class="form-grid">
+        ${field('Peso actual (kg)', 'weight', 'number', '', 'step="0.1" min="10" max="350" placeholder="Ej: 72.5"')}
+        ${field('Tensión Arterial (mmHg)', 'bp', 'text', '', 'placeholder="Ej: 120/80"')}
+        ${field('Frecuencia Cardíaca (lpm)', 'hr', 'number', '', 'min="30" max="220" placeholder="Ej: 68"')}
+        ${field('Glucemia capilar (mg/dL)', 'glucose', 'number', '', 'min="20" max="600" placeholder="Ej: 94"')}
+        ${area('Comentarios / Síntomas del día', 'notes', '', 'placeholder="Ej: En ayunas, luego de caminar 30 min..."')}
+      </div>
+      <div class="form-error" role="alert"></div>
+      <div class="dialog-actions">
+        ${btn('Cancelar', 'close-modal', '', '', 'type="button"')}
+        <button class="btn primary" type="submit" style="background:#1b4c37">${icon('check', 14)} Enviar Medición a mi Médico</button>
+      </div>
+    </form>`,
+    '', 'wide'
+  );
+}
+
+async function aiPreconsultSummaryDialog(patientId) {
+  const p = patientBy(patientId);
+  if (!p) return;
+  const mh = p.medicalHistory || {};
+  const recs = (S.data?.records || []).filter(r => r.patientId === patientId).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const recent = recs.slice(0, 5);
+  const portalUploads = recs.filter(r => r.uploadedVia === 'PORTAL_PACIENTES' || r.content?.uploadedVia === 'PORTAL_PACIENTES');
+  const prescs = (S.data?.prescriptions || []).filter(pr => pr.patientId === patientId);
+
+  const localSummary = `
+    <div style="display:grid;gap:10px;font-size:13px;line-height:1.5">
+      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px">
+        <b style="color:#991b1b">Alergias y Factores de Riesgo:</b> ${esc(mh.allergies || 'Sin alergias declaradas')} · <b>Patologías:</b> ${esc(mh.conditions || 'Sin patologías crónicas')} · <b>Medicación habitual:</b> ${esc(mh.medications || 'Ninguna')}
+      </div>
+      <div style="background:#f8fbf9;border:1px solid #d5e3d8;border-radius:8px;padding:10px 12px">
+        <b style="color:#1b4c37">Últimas Evoluciones (${recent.length}):</b>
+        <ul style="margin:6px 0 0 18px;padding:0">
+          ${recent.map(r => `<li><b>${fmtDate(r.createdAt)}</b> · ${esc(r.content?.problem || r.content?.title || r.type || 'Consulta')} ${r.content?.assessment ? `— ${esc(r.content.assessment)}` : ''}</li>`).join('') || '<li>Sin evoluciones previas registradas.</li>'}
+        </ul>
+      </div>
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px">
+        <b style="color:#1e40af">Aportes del Portal del Paciente (${portalUploads.length}) & Recetas (${prescs.length}):</b>
+        <div style="margin-top:4px">${portalUploads.length ? portalUploads.slice(0, 3).map(u => `• ${esc(u.content?.title || 'Estudio')} (${fmtDate(u.createdAt)})`).join('<br>') : 'El paciente aún no subió estudios externos.'}</div>
+      </div>
+      <div id="ai-live-preconsult-box" style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:10px 12px;color:#475569">
+        <i>Consultando análisis IA en vivo...</i>
+      </div>
+    </div>`;
+
+  showModal(`Resumen Pre-Consulta (IA) · ${nameOf(p)}`, 'Síntesis clínica automática previa al ingreso del paciente.', localSummary, '', 'wide');
+
+  try {
+    const prompt = `Genera un resumen pre-consulta médico conciso (máximo 5 bullets) para ${nameOf(p)} (Cobertura: ${p.coverage}). Alergias: ${mh.allergies || 'ninguna'}. Antecedentes: ${mh.conditions || 'ninguno'}. Últimas consultas: ${recent.map(r => `${fmtDate(r.createdAt)}: ${r.content?.problem || ''} ${r.content?.notes || ''}`).join(' | ').slice(0, 800)}.`;
+    const aiRes = await api('/api/copilot', 'POST', { text: prompt });
+    const box = $('#ai-live-preconsult-box');
+    if (box) {
+      box.innerHTML = `<b style="color:#1b4c37">Síntesis Copiloto IA (${esc(aiRes.source || 'IA')}):</b><div style="margin-top:4px;white-space:pre-line">${esc(aiRes.answer || '')}</div>`;
+    }
+  } catch {
+    const box = $('#ai-live-preconsult-box');
+    if (box) box.style.display = 'none';
+  }
 }
 
 function render() {
@@ -4570,8 +4681,20 @@ function recordsView() {
         ` : ''}
 
         <!-- Módulo Desplegable de Antecedentes Médicos y Alergias (Ley 26.529) -->
-        <div style="padding:0 18px 12px">
+        <div style="padding:0 18px 10px">
           ${medicalHistoryCard(p)}
+        </div>
+        <!-- Tablero de Problemas Activos / Crónicos (CIE-10) + Copiloto Pre-Consulta -->
+        <div style="padding:0 18px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <div class="flex" style="gap:6px;flex-wrap:wrap;align-items:center">
+            <span class="tiny muted" style="font-weight:700">Problemas / CIE-10:</span>
+            ${problems.length ? problems.slice(0, 6).map(pr => `
+              <button type="button" class="badge ${S.omniProblem === pr ? 'green' : ''}" data-action="omni-filter-chip" data-filter="problem" data-value="${esc(pr)}" style="cursor:pointer;border:1px solid ${S.omniProblem === pr ? '#1b4c37' : '#d5e3d8'};background:${S.omniProblem === pr ? '#eaf4ec' : '#f8fbf9'};color:#18362b">${esc(pr)}</button>
+            `).join('') : '<span class="tiny muted">Sin problemas codificados aún</span>'}
+          </div>
+          <button type="button" class="btn small" data-action="ai-preconsult-summary" data-id="${p.id}" style="background:#f0fdf4;border-color:#bbf7d0;color:#1b4c37;font-weight:700">
+            ${icon('spark', 13)} Resumen Pre-Consulta (IA)
+          </button>
         </div>
       </section>
 
@@ -5651,6 +5774,7 @@ function appointmentDetail(id) {
     selectField('Profesional asignado', 'doctorId', (S.data.doctors || []).map(d => [d.id, `${d.name} (${d.specialty})`]), a.doctorId, true) +
     selectField('Estado del turno', 'status', ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'NO_SHOW'].map(s => [s, statusMap[s][0]]), a.status, true) +
     `<div class="form-field full flex" style="flex-wrap:wrap;gap:8px">
+      ${a.type === 'TELEMEDICINE' ? btn('Ingresar a Videoconsulta', 'join-telemedicine', 'spark', 'primary', 'type="button" data-id="' + id + '"') : ''}
       ${btn('Reprogramar horario', 'reschedule', 'calendar', '', 'type="button" data-id="' + id + '"')}
       ${btn('Ver ficha del paciente', 'patient-detail', 'users', '', 'type="button" data-id="' + a.patientId + '"')}
       ${btn('Enviar Recordatorio WhatsApp', 'send-wa-reminder', 'phone', 'primary', 'type="button" data-id="' + id + '"')}
@@ -5743,7 +5867,8 @@ function recordForm(amendmentId = null) {
       <button type="button" class="omni-template-btn" data-template="soap">${icon('file', 12)} Plantilla SOAP</button>
     </div>` +
     patientSelect(pid) +
-    field('Tratamiento / Diagnóstico / Problema *', 'problem', 'text', oldContent.problem || '', 'required placeholder="Ej: Camara hiperbarica, Sueroterapia, Fotobiomodulación..."', true) +
+    field('Tratamiento / Diagnóstico / Problema (CIE-10) *', 'problem', 'text', oldContent.problem || '', 'required list="cie10-list" placeholder="Escribí para buscar código CIE-10 o tratamiento..."', true) +
+    `<datalist id="cie10-list">${CIE10_CATALOG.map(c => `<option value="${esc(c)}"></option>`).join('')}</datalist>` +
     selectField('Especialidad / Área', 'specialty', [
       ['Medicina Integrativa', 'Medicina Integrativa'],
       ['Enfermería y Procedimientos', 'Enfermería y Procedimientos'],
@@ -5766,6 +5891,8 @@ function recordForm(amendmentId = null) {
         <button type="button" class="omni-editor-btn" data-command="bold" title="Negrita"><b>B</b></button>
         <button type="button" class="omni-editor-btn" data-command="italic" title="Cursiva"><i>I</i></button>
         <button type="button" class="omni-editor-btn" data-command="insertUnorderedList" title="Lista con viñetas">• Lista</button>
+        <span style="border-left:1px solid #cbd5e1;height:18px;margin:0 4px"></span>
+        <button type="button" class="omni-editor-btn highlight" id="btn-voice-soap" title="Dictar evolución médica por voz">🎙️ Dictar SOAP</button>
       </div>
       <div id="omni-rich-editor" class="omni-editor-content" contenteditable="true">${oldContent.html || (oldContent.subjective ? `<p><b>S:</b> ${esc(oldContent.subjective)}</p><p><b>O:</b> ${esc(oldContent.objective || '')}</p><p><b>A:</b> ${esc(oldContent.assessment || '')}</p><p><b>P:</b> ${esc(oldContent.plan || '')}</p>` : '<p>Comienza a registrar la evolución médica o selecciona una plantilla arriba...</p>')}</div>
       <input type="hidden" name="html" id="omni-record-html">
@@ -5855,6 +5982,45 @@ function recordForm(amendmentId = null) {
         editor?.focus();
       });
     });
+
+    // Voice-to-SOAP Dictation (Web Speech API)
+    const voiceBtn = $('#btn-voice-soap');
+    if (voiceBtn) {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      let recInst = null;
+      voiceBtn.addEventListener('click', () => {
+        if (!SR) {
+          toast('Tu navegador no soporta dictado por voz nativo (usá Chrome o Edge).', true);
+          return;
+        }
+        if (recInst) {
+          recInst.stop();
+          recInst = null;
+          voiceBtn.textContent = '🎙️ Dictar SOAP';
+          return;
+        }
+        recInst = new SR();
+        recInst.lang = 'es-AR';
+        recInst.continuous = true;
+        recInst.interimResults = false;
+        voiceBtn.textContent = '⏹ Detener dictado';
+        recInst.onresult = (ev) => {
+          const transcript = Array.from(ev.results).slice(ev.resultIndex).map(r => r[0].transcript).join(' ').trim();
+          if (transcript && editor) {
+            editor.innerHTML += `<p>${esc(transcript)}</p>`;
+          }
+        };
+        recInst.onerror = () => {
+          recInst = null;
+          voiceBtn.textContent = '🎙️ Dictar SOAP';
+        };
+        recInst.onend = () => {
+          recInst = null;
+          voiceBtn.textContent = '🎙️ Dictar SOAP';
+        };
+        recInst.start();
+      });
+    }
 
     // Insert Table 3x3
     $('#btn-insert-table')?.addEventListener('click', () => {
@@ -7925,6 +8091,7 @@ function prescriptionForm() {
   formDialog('prescription', 'Emitir Receta Electrónica Legal (Ley 27.553 · Estándar RCTA)',
     'Buscador de Vademécum, código CUIR automático, QR de validación farmacéutica, logo de clínica y firma digital con matrícula del médico.',
     patientSelect() +
+    `<div id="rx-allergy-banner" class="form-field full" style="display:none"></div>` +
     `<div class="form-field full">
       <div class="between" style="margin-bottom:4px">
         <label for="field-doctorId" style="margin:0">Médico Prescriptor (Imprime Firma Digital, Sello y Matrícula) *</label>
@@ -7969,6 +8136,24 @@ function prescriptionForm() {
     const medsJsonInput = $('#rx-meds-json');
     const contentArea = $('#field-content');
     const medsState = [];
+
+    const updateAllergyBanner = () => {
+      const pid = $('#field-patientId')?.value || S.selectedPatient;
+      const pat = patientBy(pid);
+      const alg = pat?.medicalHistory?.allergies || '';
+      const hasAlg = Boolean(alg && !/^(ninguna|no refiere|no reporta|sin alergias|no tiene)$/i.test(alg.trim()));
+      const banner = $('#rx-allergy-banner');
+      if (!banner) return;
+      if (!hasAlg) {
+        banner.style.display = 'none';
+        banner.innerHTML = '';
+        return;
+      }
+      banner.style.display = 'block';
+      banner.innerHTML = `<div class="allergies-alert" style="margin:0"><div class="flex" style="gap:8px"><span class="alert-pulse">${icon('warning', 16)}</span><div><strong style="font-size:11px;color:#9e3223">ALERTA DE SEGURIDAD AL PRESCRIBIR:</strong> ${esc(nameOf(pat))} declara alergia a <b>${esc(alg)}</b></div></div><span class="badge red">Verificar antes de firmar</span></div>`;
+    };
+    updateAllergyBanner();
+    $('#field-patientId')?.addEventListener('change', updateAllergyBanner);
 
     const syncMeds = () => {
       if (medsJsonInput) medsJsonInput.value = JSON.stringify(medsState);
@@ -8760,6 +8945,18 @@ document.addEventListener('click', async e => {
         portalUploadDialog();
         break;
       }
+      case 'portal-open-vitals': {
+        portalVitalsDialog();
+        break;
+      }
+      case 'join-telemedicine': {
+        openTelemedicineRoom(id);
+        break;
+      }
+      case 'ai-preconsult-summary': {
+        aiPreconsultSummaryDialog(id || S.selectedPatient);
+        break;
+      }
       case 'portal-print-prescription':
         printPrescriptionDocument(id);
         break;
@@ -9222,6 +9419,28 @@ document.addEventListener('submit', async e => {
         await api('/api/portal/upload-study', 'POST', b);
         closeModal();
         toast('Estudio subido correctamente a tu historia clínica.');
+        await refreshPortal();
+        S.portal.activeTab = 'estudios';
+        render();
+        return;
+      }
+      case 'portal-vitals': {
+        const parts = [];
+        if (b.weight) parts.push(`Peso: ${b.weight} kg`);
+        if (b.bp) parts.push(`TA: ${b.bp} mmHg`);
+        if (b.hr) parts.push(`FC: ${b.hr} lpm`);
+        if (b.glucose) parts.push(`Glucemia: ${b.glucose} mg/dL`);
+        if (!parts.length) throw Error('Ingresá al menos una medición (peso, presión, FC o glucemia).');
+        const summaryNotes = `${parts.join(' · ')}${b.notes ? '\nComentarios: ' + b.notes : ''}`;
+        await api('/api/portal/upload-study', 'POST', {
+          studyType: 'VITALS',
+          title: 'Autoregistro de Signos Vitales en Casa',
+          specialty: 'Autocontrol Paciente',
+          notes: summaryNotes,
+          attachmentPayload: '[]'
+        });
+        closeModal();
+        toast('Medición enviada en tiempo real a la Historia Clínica de tu médico.');
         await refreshPortal();
         S.portal.activeTab = 'estudios';
         render();

@@ -1,0 +1,21 @@
+{
+  "name": "Abundance · Clinic OS",
+  "short_name": "Abundance OS",
+  "description": "Plataforma Integral de Gestión Clínica, Historia Clínica Electrónica y Portal de Pacientes.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f8f6",
+  "theme_color": "#1b4c37",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
