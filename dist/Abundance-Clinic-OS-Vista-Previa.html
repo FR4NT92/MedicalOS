@@ -8447,6 +8447,13 @@ function quoteForm(patientId = null) {
         const rowTotal = qty * price;
         sum += rowTotal;
         if (sub) sub.textContent = '
+  <script>
+    if ('serviceWorker' in navigator && !window.CLINIC_PREVIEW) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
+    }
+  </script>
 </body>
 </html>
  + rowTotal.toLocaleString('es-AR');
@@ -11483,5 +11490,12 @@ document.addEventListener('keydown', (e) => {
 boot();
 })();
 </script>
+  <script>
+    if ('serviceWorker' in navigator && !window.CLINIC_PREVIEW) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
+    }
+  </script>
 </body>
 </html>

@@ -17,5 +17,12 @@
   <dialog id="modal"></dialog>
   <div id="toasts" aria-live="polite" aria-atomic="false"></div>
   <script src="/app.js" defer></script>
+  <script>
+    if ('serviceWorker' in navigator && !window.CLINIC_PREVIEW) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
+    }
+  </script>
 </body>
 </html>

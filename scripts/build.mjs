@@ -28,7 +28,7 @@ const out = join(root, 'dist');
 mkdirSync(out, { recursive: true });
 
 if (existsSync(pub)) {
-  for (const f of ['app.js', 'styles.css', 'favicon.svg', 'favicon.png', 'logo.png', 'index.html']) {
+  for (const f of ['app.js', 'styles.css', 'favicon.svg', 'favicon.png', 'logo.png', 'index.html', 'manifest.webmanifest', 'sw.js']) {
     const src = join(pub, f);
     if (existsSync(src)) writeFileSync(join(out, f), readFileSync(src));
   }
